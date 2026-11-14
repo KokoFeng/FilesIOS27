@@ -45,8 +45,13 @@ import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.VideoView
 import androidx.core.content.FileProvider
+import android.provider.OpenableColumns
 import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -95,6 +100,10 @@ class MainActivity : Activity() {
     val ui = Handler(Looper.getMainLooper())
     val prefs by lazy { getSharedPreferences("files", MODE_PRIVATE) }
     val df = SimpleDateFormat("M/d/yy", Locale.getDefault())
+    val recentTs = HashMap<String, Long>()
+    var pendingShare: Intent? = null
+    val trashDir: File by lazy { File(getExternalFilesDir(null) ?: filesDir, "RecentlyDeleted").also { it.mkdirs() } }
+    val icloudDir: File by lazy { File(Environment.getExternalStorageDirectory(), "iCloud Drive").also { it.mkdirs() } }
 
     // ---------- helpers ----------
     fun flp(w: Int, h: Int, g: Int = Gravity.NO_GRAVITY) = FrameLayout.LayoutParams(w, h, g)
@@ -150,6 +159,15 @@ class MainActivity : Activity() {
             i
         }
         root.requestApplyInsets()
+        if (intent?.action == Intent.ACTION_SEND) pendingShare = intent
+    }
+
+    override fun onNewIntent(i: Intent?) {
+        super.onNewIntent(i)
+        if (i?.action == Intent.ACTION_SEND) {
+            pendingShare = i
+            if (overlay != null) consumeShare()
+        }
     }
 
     fun start() { if (hasAccess()) buildMain() else showPermission() }
@@ -222,10 +240,13 @@ class MainActivity : Activity() {
         buildBar()
         root.addView(o, MATCH, MATCH)
         showTab(2, false)
+        purgeTrash()
+        ui.postDelayed({ consumeShare() }, 400)
     }
 
     // ---------- bottom bar ----------
     fun buildBar() {
+        val sw = resources.displayMetrics.widthPixels
         val b = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -234,21 +255,26 @@ class MainActivity : Activity() {
             elevation = dp(10f)
         }
         val names = arrayOf("Recents", "Shared", "Browse")
-        val icons = arrayOf(P.CLOCK, P.PEOPLE, P.FOLDER)
+        val icons = arrayOf(P.CLOCK, P.SHAREDFOLDER, P.FOLDER)
         for (i in 0..2) {
             val cell = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                setPadding(dpi(22), dpi(8), dpi(22), dpi(6))
+                setPadding(dpi(4), dpi(8), dpi(4), dpi(6))
                 tag = icons[i]
             }
             cell.addView(icon(icons[i], C.GRAY, 26))
-            cell.addView(tv(names[i], 10f, C.GRAY, true))
+            cell.addView(tv(names[i], 11f, C.GRAY, true).apply {
+                maxLines = 1
+                setSingleLine()
+                ellipsize = null
+                gravity = Gravity.CENTER
+            }, llp(WRAP, WRAP))
             cell.setOnClickListener { if (tab != i) showTab(i, true) else popToRoot() }
-            b.addView(cell)
+            b.addView(cell, llp(0, WRAP, 1f))
         }
         barView = b
-        root.addView(b, flp(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = botInset + dpi(10) })
+        root.addView(b, flp(minOf(sw - dpi(40), dpi(340)), WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = botInset + dpi(10) })
     }
 
     fun updateBar() {
@@ -368,7 +394,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             background = rr(0x1F767680, dp(10f))
             setPadding(dpi(8), 0, dpi(8), 0)
-            setOnClickListener { pushPage(ListPage(internal, 0, "On My Phone", true, true).view) }
+            setOnClickListener { pushPage(ListPage(internal, 0, "On My iPhone", true, true).view) }
         }
         sb.addView(icon(P.SEARCH, C.GRAY, 18))
         sb.addView(tv("Search", 17f, C.GRAY).apply { setPadding(dpi(8), 0, 0, 0) }, llp(0, WRAP, 1f))
@@ -382,7 +408,8 @@ class MainActivity : Activity() {
         section(col, "Favorites", favs.map { Triple(it.name, P.FOLDER, it) })
 
         val locs = ArrayList<Triple<String, String, File>>()
-        locs.add(Triple("On My Phone", P.PHONE, internal))
+        locs.add(Triple("iCloud Drive", P.CLOUD, icloudDir))
+        locs.add(Triple("On My iPhone", P.PHONE, internal))
         try {
             val dirs = getExternalFilesDirs(null)
             for (i in 1 until dirs.size) {
@@ -391,6 +418,7 @@ class MainActivity : Activity() {
                 locs.add(Triple("SD Card", P.FOLDER, File(p)))
             }
         } catch (e: Exception) {}
+        locs.add(Triple("Recently Deleted", P.TRASH, trashDir))
         section(col, "Locations", locs)
         return sv
     }
@@ -408,7 +436,7 @@ class MainActivity : Activity() {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dpi(14), 0, dpi(14), 0)
                 background = pressBg()
-                setOnClickListener { pushPage(ListPage(r.third, 0, r.first, true).view) }
+                setOnClickListener { pushPage(ListPage(r.third, if (r.third.path == trashDir.path) 3 else 0, r.first, true).view) }
             }
             row.addView(icon(r.second, C.BLUE, 24))
             row.addView(tv(r.first, 17f, Color.BLACK).apply { setPadding(dpi(14), 0, 0, 0) }, llp(0, WRAP, 1f))
@@ -439,20 +467,22 @@ class MainActivity : Activity() {
     fun makeCell(g: Boolean): LinearLayout {
         val c = LinearLayout(this).apply { background = pressBg() }
         val thumb = FileThumbView(this)
-        val name = tv("", if (g) 12f else 16f, Color.BLACK)
-        val sub = tv("", if (g) 11f else 13f, C.GRAY)
+        val name = tv("", if (g) 14f else 16f, Color.BLACK)
+        val sub = tv("", if (g) 12f else 13f, C.GRAY)
         val dot = View(this)
         name.maxLines = 2
         name.ellipsize = TextUtils.TruncateAt.END
+        sub.maxLines = if (g) 2 else 1
         val nr = LinearLayout(this).apply { gravity = if (g) Gravity.CENTER else Gravity.CENTER_VERTICAL }
         nr.addView(dot, llp(dpi(8), dpi(8)).apply { marginEnd = dpi(4) })
         if (g) {
             name.gravity = Gravity.CENTER
+            sub.gravity = Gravity.CENTER
             nr.addView(name, llp(WRAP, WRAP))
             c.orientation = LinearLayout.VERTICAL
             c.gravity = Gravity.CENTER_HORIZONTAL
             c.setPadding(dpi(4), dpi(10), dpi(4), dpi(8))
-            c.addView(thumb, llp(dpi(80), dpi(68)))
+            c.addView(thumb, llp(MATCH, dpi(96)))
             c.addView(nr, llp(WRAP, WRAP).apply { topMargin = dpi(4) })
             c.addView(sub, llp(WRAP, WRAP))
         } else {
@@ -471,15 +501,47 @@ class MainActivity : Activity() {
         return c
     }
 
-    fun bindCell(c: View, f: File) {
+    fun midCut(n: String, max: Int): String =
+        if (n.length <= max) n else n.substring(0, (max * 0.55).toInt()) + "…" + n.substring(n.length - (max * 0.35).toInt())
+
+    fun dayStr(ts: Long): String {
+        val now = Calendar.getInstance()
+        val c = Calendar.getInstance().apply { timeInMillis = ts }
+        if (now.get(Calendar.YEAR) == c.get(Calendar.YEAR) && now.get(Calendar.DAY_OF_YEAR) == c.get(Calendar.DAY_OF_YEAR))
+            return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
+        now.add(Calendar.DAY_OF_YEAR, -1)
+        if (now.get(Calendar.YEAR) == c.get(Calendar.YEAR) && now.get(Calendar.DAY_OF_YEAR) == c.get(Calendar.DAY_OF_YEAR)) return "Yesterday"
+        return df.format(Date(ts))
+    }
+
+    fun locationOf(f: File): String {
+        val p = f.path
+        return when {
+            p.startsWith(trashDir.path) -> "Recently Deleted"
+            p.startsWith(icloudDir.path) -> "iCloud Drive"
+            p.startsWith(Environment.getExternalStorageDirectory().path) -> "On My iPhone"
+            else -> "SD Card"
+        }
+    }
+
+    fun subText(f: File, g: Boolean, kind: Int): String {
+        val sep = if (g) "\n" else " – "
+        if (kind == 1) return dayStr(recentTs[f.path] ?: f.lastModified()) + sep + locationOf(f)
+        if (f.isDirectory) {
+            val n = f.list()?.size ?: 0
+            return if (n == 1) "1 item" else "$n items"
+        }
+        return df.format(Date(f.lastModified())) + sep + FileOps.size(f.length())
+    }
+
+    fun bindCell(c: View, f: File, g: Boolean, kind: Int) {
         val h = c.tag as H
         h.thumb.bind(f)
-        h.name.text = f.name
+        h.name.text = if (g) midCut(f.name, 28) else f.name
         val t = tagOf(f)
         h.dot.visibility = if (t != 0) View.VISIBLE else View.GONE
         if (t != 0) h.dot.background = oval(t)
-        val extra = if (f.isDirectory) "${f.list()?.size ?: 0} items" else FileOps.size(f.length())
-        h.sub.text = df.format(Date(f.lastModified())) + " – " + extra
+        h.sub.text = subText(f, g, kind)
     }
 
     inner class ListPage(val dir: File?, val kind: Int, val title: String, val back: Boolean, val focusSearch: Boolean = false) {
@@ -501,7 +563,7 @@ class MainActivity : Activity() {
             override fun getItemId(p: Int) = p.toLong()
             override fun getView(p: Int, cv: View?, parent: ViewGroup?): View {
                 val row = cv ?: makeCell(g)
-                bindCell(row, items[p])
+                bindCell(row, items[p], g, kind)
                 return row
             }
         }
@@ -561,7 +623,7 @@ class MainActivity : Activity() {
                 setPadding(0, 0, 0, botInset + dpi(110))
                 adapter = la
                 setOnItemClickListener { _, _, pos, _ -> onItem(items[pos]) }
-                setOnItemLongClickListener { _, v, pos, _ -> contextMenu(items[pos], v); true }
+                setOnItemLongClickListener { _, v, pos, _ -> contextMenu(items[pos], v, kind); true }
             }
             grid.apply {
                 numColumns = (root.width / dpi(115)).coerceAtLeast(3)
@@ -571,7 +633,7 @@ class MainActivity : Activity() {
                 setPadding(dpi(8), dpi(4), dpi(8), botInset + dpi(110))
                 adapter = ga
                 setOnItemClickListener { _, _, pos, _ -> onItem(items[pos]) }
-                setOnItemLongClickListener { _, v, pos, _ -> contextMenu(items[pos], v); true }
+                setOnItemLongClickListener { _, v, pos, _ -> contextMenu(items[pos], v, kind); true }
             }
             empty.gravity = Gravity.CENTER
             empty.visibility = View.GONE
@@ -594,6 +656,11 @@ class MainActivity : Activity() {
 
         fun onItem(f: File) {
             hideKb()
+            if (kind == 3) {
+                alert("Recently Deleted", "\"${f.name}\" was deleted recently. Recover it to open it.", null, 0,
+                    listOf(Btn("Cancel"), Btn("Recover", 1) { bg("Recovered") { recover(f) } }))
+                return
+            }
             if (f.isDirectory) pushPage(ListPage(f, 0, f.name, true).view) else openFile(f)
         }
 
@@ -602,7 +669,8 @@ class MainActivity : Activity() {
                 val r: List<File> = try {
                     when (kind) {
                         0 -> FileOps.list(dir!!)
-                        1 -> FileOps.recent(Environment.getExternalStorageDirectory(), 80)
+                        3 -> FileOps.list(dir!!).sortedByDescending { prefs.getLong("del:" + it.path, it.lastModified()) }
+                        1 -> loadRecents()
                         else -> prefs.getString("shared", "")!!.split("\n").filter { it.isNotBlank() }.map { File(it) }.filter { it.exists() }
                     }
                 } catch (e: Exception) { emptyList() }
@@ -639,7 +707,12 @@ class MainActivity : Activity() {
         val loc = IntArray(2)
         v.getLocationOnScreen(loc)
         val items = ArrayList<Mi>()
+        if (pg.kind == 3) {
+            items.add(Mi("Delete All", P.TRASH, destructive = true) { confirmPurge(pg.base) })
+            items.add(Mi(sep = true))
+        }
         if (pg.kind == 0) {
+            items.add(Mi("Download from URL", P.DOWNLOAD) { askUrl(pg.dir!!) })
             items.add(Mi("New Folder", P.NEWFOLDER) {
                 alert("New Folder", null, "untitled folder", 14, listOf(Btn("Cancel"), Btn("Done", 1) { n ->
                     val nn = n.trim()
@@ -841,9 +914,10 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    fun contextMenu(f: File, cell: View) {
+    fun contextMenu(f: File, cell: View, kind: Int = 0) {
         val loc = IntArray(2)
         cell.getLocationOnScreen(loc)
+        if (kind == 3) { trashMenu(f, loc[0] + cell.width / 2f - dpi(125), loc[1] + cell.height - dpi(8).toFloat()); return }
         val ext = FileOps.ext(f)
         val top = listOf(
             Mi("Copy", P.COPY) { clip = Pair(listOf(f), false); toast("Copied") },
@@ -869,11 +943,7 @@ class MainActivity : Activity() {
         items.add(Mi(sep = true))
         items.add(Mi("Tags…", P.TAG) { tagMenu(f, loc[0] + cell.width / 2f - dpi(125), loc[1] + cell.height.toFloat()) })
         items.add(Mi(sep = true))
-        items.add(Mi("Delete", P.TRASH, destructive = true) {
-            alert("Delete \"${f.name}\"?", "This item will be deleted permanently.", null, 0, listOf(Btn("Cancel"), Btn("Delete", 2) {
-                bg("Deleted") { f.deleteRecursively(); prefs.edit().remove("t:" + f.path).apply() }
-            }))
-        })
+        items.add(Mi("Delete", P.TRASH, destructive = true) { bg("Moved to Recently Deleted") { trashIt(f) } })
         showMenu(loc[0] + cell.width / 2f - dpi(125), loc[1] + cell.height - dpi(8).toFloat(), top, items)
     }
 
@@ -945,6 +1015,7 @@ class MainActivity : Activity() {
     }
 
     fun openFile(f: File) {
+        addRecent(f)
         val e = FileOps.ext(f)
         when {
             e in FileOps.IMG -> viewerImage(f)
@@ -960,6 +1031,226 @@ class MainActivity : Activity() {
                 } catch (x: Exception) { toast("No app can open this file") }
             }
         }
+    }
+
+    // ---------- recents / trash ----------
+    fun addRecent(f: File) {
+        val cur = prefs.getString("recent", "")!!.split("\n").filter { it.isNotBlank() && !it.endsWith("|" + f.path) }
+        val n = (listOf(System.currentTimeMillis().toString() + "|" + f.path) + cur).take(100)
+        prefs.edit().putString("recent", n.joinToString("\n")).apply()
+    }
+
+    fun loadRecents(): List<File> {
+        val out = ArrayList<File>()
+        val ts = HashMap<String, Long>()
+        for (line in prefs.getString("recent", "")!!.split("\n")) {
+            val i = line.indexOf('|')
+            if (i < 0) continue
+            val t = line.substring(0, i).toLongOrNull() ?: continue
+            val f = File(line.substring(i + 1))
+            if (f.exists()) { out.add(f); ts[f.path] = t }
+        }
+        recentTs.clear()
+        recentTs.putAll(ts)
+        return out
+    }
+
+    fun trashIt(f: File) {
+        val dst = FileOps.move(f, trashDir)
+        prefs.edit().putString("orig:" + dst.path, f.parent ?: "").putLong("del:" + dst.path, System.currentTimeMillis()).apply()
+    }
+
+    fun recover(f: File) {
+        var dir = File(prefs.getString("orig:" + f.path, "") ?: "")
+        if (!dir.isDirectory) dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).also { it.mkdirs() }
+        FileOps.move(f, dir)
+        prefs.edit().remove("orig:" + f.path).remove("del:" + f.path).apply()
+    }
+
+    fun purgeTrash() {
+        Thread {
+            val now = System.currentTimeMillis()
+            trashDir.listFiles()?.forEach {
+                val t = prefs.getLong("del:" + it.path, 0L)
+                if (t > 0 && now - t > 30L * 24 * 3600 * 1000) {
+                    it.deleteRecursively()
+                    prefs.edit().remove("del:" + it.path).remove("orig:" + it.path).apply()
+                }
+            }
+        }.start()
+    }
+
+    fun trashMenu(f: File, x: Float, y: Float) {
+        val items = listOf(
+            Mi("Recover", P.UNZIP) { bg("Recovered") { recover(f) } },
+            Mi("Delete Now", P.TRASH, destructive = true) { confirmPurge(listOf(f)) }
+        )
+        showMenu(x, y, null, items)
+    }
+
+    fun confirmPurge(files: List<File>) {
+        if (files.isEmpty()) return
+        val title = if (files.size == 1) "Delete \"${files[0].name}\"?" else "Delete ${files.size} items?"
+        alert(title, "This can't be undone.", null, 0, listOf(Btn("Cancel"), Btn("Delete", 2) {
+            bg("Deleted") {
+                for (x in files) {
+                    x.deleteRecursively()
+                    prefs.edit().remove("orig:" + x.path).remove("del:" + x.path).remove("t:" + x.path).apply()
+                }
+            }
+        }))
+    }
+
+    // ---------- download / save ----------
+    fun guessName(url: String): String {
+        val p = try { Uri.parse(url).lastPathSegment } catch (e: Exception) { null }
+        val n = (p ?: "").substringBefore('?').trim()
+        return if (n.isBlank()) "download" else n
+    }
+
+    fun finalName(typed: String, orig: String): String {
+        val n = typed.trim().replace("/", "_")
+        val oe = orig.substringAfterLast('.', "")
+        return if (!n.contains('.') && oe.isNotEmpty() && oe.length <= 5) "$n.$oe" else n
+    }
+
+    fun askUrl(dir: File) {
+        alert("Download from URL", "Enter the link of the file", "https://", 8, listOf(Btn("Cancel"), Btn("Next", 1) { n ->
+            val u = n.trim()
+            if (u.startsWith("http://") || u.startsWith("https://")) askDownload(u, dir) else toast("Invalid link")
+        }))
+    }
+
+    fun askDownload(url: String, dir: File) {
+        val orig = guessName(url)
+        val sel = if (orig.contains('.')) orig.lastIndexOf('.') else orig.length
+        alert("Download", "Give this file a name before it downloads.", orig, sel, listOf(Btn("Cancel"), Btn("Done", 1) { n ->
+            if (n.isBlank()) { toast("A name is required"); askDownload(url, dir) }
+            else startDownload(url, dir, finalName(n, orig))
+        }))
+    }
+
+    fun progressPill(m: String): TextView {
+        val t = tv(m, 14f, Color.WHITE).apply {
+            background = rr(0xE62C2C2E.toInt(), dp(20f))
+            setPadding(dpi(18), dpi(10), dpi(18), dpi(10))
+            elevation = dp(6f)
+        }
+        overlay?.addView(t, flp(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = botInset + dpi(100) })
+        return t
+    }
+
+    fun removePill(t: View) { overlay?.removeView(t) }
+
+    fun openConn(url: String): HttpURLConnection {
+        var u = URL(url)
+        var n = 0
+        while (true) {
+            val c = u.openConnection() as HttpURLConnection
+            c.connectTimeout = 15000
+            c.readTimeout = 30000
+            c.instanceFollowRedirects = false
+            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) Files/1.0")
+            val code = c.responseCode
+            if (code in 301..303 || code == 307 || code == 308) {
+                val loc = c.getHeaderField("Location") ?: throw Exception("Bad redirect")
+                u = URL(u, loc)
+                c.disconnect()
+                if (++n > 6) throw Exception("Too many redirects")
+                continue
+            }
+            if (code !in 200..299) throw Exception("HTTP $code")
+            return c
+        }
+    }
+
+    fun startDownload(url: String, dir: File, name: String) {
+        val pill = progressPill("Downloading…")
+        Thread {
+            val tmp = File(dir, ".$name.part")
+            try {
+                dir.mkdirs()
+                val dst = FileOps.unique(dir, name)
+                val c = openConn(url)
+                val total = c.contentLengthLong
+                var got = 0L
+                var last = 0L
+                c.inputStream.use { ins ->
+                    FileOutputStream(tmp).use { out ->
+                        val buf = ByteArray(65536)
+                        while (true) {
+                            val r = ins.read(buf)
+                            if (r < 0) break
+                            out.write(buf, 0, r)
+                            got += r
+                            val now = System.currentTimeMillis()
+                            if (now - last > 300) {
+                                last = now
+                                val txt = if (total > 0) "Downloading ${got * 100 / total}%" else "Downloading ${FileOps.size(got)}"
+                                ui.post { pill.text = txt }
+                            }
+                        }
+                    }
+                }
+                if (!tmp.renameTo(dst)) throw Exception("Cannot save file")
+                ui.post { removePill(pill); finishSave(dst) }
+            } catch (e: Throwable) {
+                tmp.delete()
+                ui.post { removePill(pill); toast("Download failed: " + (e.message ?: "error")) }
+            }
+        }.start()
+    }
+
+    fun finishSave(dst: File) {
+        addRecent(dst)
+        reloadAll()
+        if (FileOps.ext(dst) == "apk") {
+            alert("Install \"${dst.name}\"?", "The file was downloaded.", null, 0, listOf(Btn("Cancel"), Btn("Install", 1) { install(dst) }))
+        } else toast("Downloaded")
+    }
+
+    fun consumeShare() {
+        val i = pendingShare ?: return
+        pendingShare = null
+        val dl = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        @Suppress("DEPRECATION")
+        val stream: Uri? = i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        if (stream != null) { askSave(stream, dl); return }
+        val txt = i.getStringExtra(Intent.EXTRA_TEXT) ?: ""
+        val m = Regex("https?://\\S+").find(txt)
+        if (m != null) askDownload(m.value, dl) else toast("Nothing to download")
+    }
+
+    fun askSave(u: Uri, dir: File) {
+        var orig = u.lastPathSegment ?: "file"
+        try {
+            contentResolver.query(u, null, null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val ix = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (ix >= 0) orig = c.getString(ix) ?: orig
+                }
+            }
+        } catch (e: Exception) {}
+        val o = orig
+        val sel = if (o.contains('.')) o.lastIndexOf('.') else o.length
+        alert("Save to Files", "Give this file a name.", o, sel, listOf(Btn("Cancel"), Btn("Done", 1) { n ->
+            if (n.isBlank()) { toast("A name is required"); askSave(u, dir) }
+            else {
+                val name = finalName(n, o)
+                val pill = progressPill("Saving…")
+                Thread {
+                    try {
+                        dir.mkdirs()
+                        val dst = FileOps.unique(dir, name)
+                        val ins = contentResolver.openInputStream(u) ?: throw Exception("Cannot read file")
+                        ins.use { s -> FileOutputStream(dst).use { s.copyTo(it) } }
+                        ui.post { removePill(pill); finishSave(dst) }
+                    } catch (e: Throwable) {
+                        ui.post { removePill(pill); toast("Failed: " + (e.message ?: "error")) }
+                    }
+                }.start()
+            }
+        }))
     }
 
     // ---------- viewers ----------

@@ -86,6 +86,8 @@ object P {
     const val LIST = "M4,6h16 M4,12h16 M4,18h16"
     const val PLAY = "M7,4L20,12L7,20z"
     const val PAUSE = "M6,4h4v16h-4z M14,4h4v16h-4z"
+    const val SHAREDFOLDER = "M3,7a2,2 0 0,1 2,-2h4l2,2h8a2,2 0 0,1 2,2v8a2,2 0 0,1 -2,2h-14a2,2 0 0,1 -2,-2z M12,9.5a1.5,1.5 0 1,0 0.01,0 M9.5,16c0,-2 1.2,-3 2.5,-3s2.5,1 2.5,3"
+    const val CLOUD = "M7,18a4,4 0 0,1 -0.5,-8a5.5,5.5 0 0,1 10.7,-1.2a4.2,4.2 0 0,1 0.8,9.2z"
     const val NOTE = "M9,18V5l12,-2v13 M9,18a3,3 0 1,1 -6,0a3,3 0 0,1 6,0 M21,16a3,3 0 1,1 -6,0a3,3 0 0,1 6,0"
 }
 
@@ -229,47 +231,104 @@ class FileThumbView(ctx: Context) : View(ctx) {
         Thumbs.load(f, 256) { b -> if (file == f) { bmp = b; invalidate() } }
     }
 
+    private val zipIc = IconDrawable(P.ARCHIVE, 0xFF8E8E93.toInt())
+    private val txtIc = IconDrawable(P.LIST, 0xFF8E8E93.toInt())
+
     override fun onDraw(canvas: Canvas) {
         val f = file ?: return
         val w = width.toFloat()
         val h = height.toFloat()
+        val d = resources.displayMetrics.density
         if (f.isDirectory) {
             folder.setBounds(0, (h * 0.1f).toInt(), width, (h * 0.92f).toInt())
             folder.draw(canvas)
             return
         }
+        val e = f.extension.lowercase()
         val b = bmp
-        if (b != null) {
-            val r = RectF(w * 0.04f, h * 0.04f, w * 0.96f, h * 0.96f)
-            canvas.save()
-            canvas.clipPath(Path().apply { addRoundRect(r, w * 0.08f, w * 0.08f, Path.Direction.CW) })
-            val s = maxOf(r.width() / b.width, r.height() / b.height)
+        // Foto / video: thumbnail apa adanya (rasio asli), seperti Files iOS
+        if (b != null && e != "apk") {
+            val s = minOf(w * 0.92f / b.width, h * 0.96f / b.height)
             val dw = b.width * s
             val dh = b.height * s
-            canvas.drawBitmap(b, null, RectF(r.centerX() - dw / 2, r.centerY() - dh / 2, r.centerX() + dw / 2, r.centerY() + dh / 2), p)
+            val r = RectF(w / 2 - dw / 2, h / 2 - dh / 2, w / 2 + dw / 2, h / 2 + dh / 2)
+            canvas.save()
+            canvas.clipPath(Path().apply { addRoundRect(r, 3 * d, 3 * d, Path.Direction.CW) })
+            canvas.drawBitmap(b, null, r, p)
             canvas.restore()
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 1f
+            p.color = 0x22000000
+            canvas.drawRoundRect(r, 3 * d, 3 * d, p)
             return
         }
-        val page = RectF(w * 0.2f, h * 0.04f, w * 0.8f, h * 0.96f)
+        // Halaman dokumen dengan sudut terlipat
+        val ph = h * 0.96f
+        val pw = minOf(ph * 0.74f, w * 0.9f)
+        val l = w / 2 - pw / 2
+        val t = h / 2 - ph / 2
+        val rg = l + pw
+        val bt = t + ph
+        val fold = pw * 0.28f
+        val rad = pw * 0.07f
+        val page = Path().apply {
+            moveTo(l + rad, t); lineTo(rg - fold, t); lineTo(rg, t + fold); lineTo(rg, bt - rad)
+            quadTo(rg, bt, rg - rad, bt); lineTo(l + rad, bt); quadTo(l, bt, l, bt - rad)
+            lineTo(l, t + rad); quadTo(l, t, l + rad, t); close()
+        }
         p.style = Paint.Style.FILL
         p.color = Color.WHITE
-        canvas.drawRoundRect(page, w * 0.06f, w * 0.06f, p)
+        canvas.drawPath(page, p)
         p.style = Paint.Style.STROKE
-        p.strokeWidth = 1.5f
-        p.color = 0xFFD1D1D6.toInt()
-        canvas.drawRoundRect(page, w * 0.06f, w * 0.06f, p)
-        val e = f.extension.lowercase().take(4).uppercase()
-        val col = when {
-            f.extension.lowercase() in FileOps.AUD -> 0xFFFF2D55.toInt()
-            f.extension.lowercase() in FileOps.VID -> 0xFF5856D6.toInt()
-            f.extension.lowercase() in FileOps.TXT -> 0xFF8E8E93.toInt()
-            f.extension.lowercase() == "apk" -> 0xFF34C759.toInt()
-            f.extension.lowercase() == "zip" -> 0xFFFF9500.toInt()
-            else -> C.BLUE
+        p.strokeWidth = 1.2f
+        p.color = 0xFFE0E0E5.toInt()
+        canvas.drawPath(page, p)
+        p.style = Paint.Style.FILL
+        p.color = 0xFFEDEDF1.toInt()
+        canvas.drawPath(Path().apply { moveTo(rg - fold, t); lineTo(rg - fold, t + fold); lineTo(rg, t + fold); close() }, p)
+        val cx = w / 2
+        val cy = h / 2 + fold * 0.25f
+        when {
+            e in FileOps.AUD -> {
+                // gelombang suara biru
+                val fr = floatArrayOf(0.3f, 0.6f, 1f, 0.7f, 0.5f, 0.85f, 0.35f)
+                val bw = pw * 0.045f
+                val gap = pw * 0.075f
+                val tot = fr.size * bw + (fr.size - 1) * gap
+                val mh = ph * 0.34f
+                p.style = Paint.Style.FILL
+                p.color = C.BLUE
+                for (i in fr.indices) {
+                    val x = cx - tot / 2 + i * (bw + gap)
+                    val bh = mh * fr[i]
+                    canvas.drawRoundRect(RectF(x, cy - bh / 2, x + bw, cy + bh / 2), bw / 2, bw / 2, p)
+                }
+            }
+            e == "apk" && b != null -> {
+                val s = pw * 0.55f
+                val r = RectF(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2)
+                canvas.save()
+                canvas.clipPath(Path().apply { addRoundRect(r, s * 0.22f, s * 0.22f, Path.Direction.CW) })
+                canvas.drawBitmap(b, null, r, p)
+                canvas.restore()
+            }
+            e in FileOps.VID -> {
+                val s = pw * 0.3f
+                p.style = Paint.Style.FILL
+                p.color = C.BLUE
+                canvas.drawPath(Path().apply { moveTo(cx - s / 3, cy - s / 2); lineTo(cx + s / 1.7f, cy); lineTo(cx - s / 3, cy + s / 2); close() }, p)
+            }
+            e == "zip" -> {
+                val s = (pw * 0.5f).toInt()
+                zipIc.setBounds((cx - s / 2).toInt(), (cy - s / 2).toInt(), (cx + s / 2).toInt(), (cy + s / 2).toInt())
+                zipIc.draw(canvas)
+            }
+            e in FileOps.TXT -> {
+                val s = (pw * 0.5f).toInt()
+                txtIc.setBounds((cx - s / 2).toInt(), (cy - s / 2).toInt(), (cx + s / 2).toInt(), (cy + s / 2).toInt())
+                txtIc.draw(canvas)
+            }
         }
-        tp.color = col
-        tp.textSize = w * (if (e.length > 3) 0.15f else 0.19f)
-        canvas.drawText(e, w / 2, h / 2 + tp.textSize / 3, tp)
     }
 }
 
