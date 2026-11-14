@@ -1273,15 +1273,135 @@ class MainActivity : Activity() {
     fun followUp(d: File, open: Boolean) {
         addRecent(d)
         val e = FileOps.ext(d)
-        val cancel = Btn("Cancel")
+        val trash = Btn("Delete", 2) { bg("Moved to Recently Deleted") { trashIt(d) } }
         when {
-            e in INSTALLABLE -> alert("Install \"${d.name}\"?", null, null, 0, listOf(cancel, Btn("Install", 1) { install(d) }))
+            e in INSTALLABLE -> chooseAction(d)
             e in FileOps.IMG || e in FileOps.VID || e in FileOps.AUD || e in FileOps.TXT ->
                 if (open) openFile(d) else toast("Downloaded")
-            e == "zip" -> alert("Extract \"${d.name}\"?", null, null, 0, listOf(cancel, Btn("Extract", 1) { extract(d) }))
-            else -> alert("Open \"${d.name}\"?", "Android can't install or run this file type by itself. It will be opened with another app.", null, 0,
-                listOf(cancel, Btn("Open", 1) { openWith(d) }))
+            e == "zip" -> actionSheet("Choose Action", "Choose desired action to perform with this.",
+                listOf(Btn("Extract") { extract(d) }, Btn("Share File") { share(d) }, trash))
+            else -> actionSheet("Choose Action", "Choose desired action to perform with this.",
+                listOf(Btn("Open") { openWith(d) }, Btn("Share File") { share(d) }, trash))
         }
+    }
+
+    /** Sheet aksi dari bawah ala iOS: kartu aksi + kartu Cancel terpisah. */
+    fun actionSheet(title: String, sub: String?, buttons: List<Btn>, cancel: String = "Cancel", accent: Int = 0xFF2F9DF0.toInt(), big: Boolean = true) {
+        val o = overlay ?: return
+        hideKb()
+        val dim = View(this).apply { setBackgroundColor(0x55000000); alpha = 0f; isClickable = true }
+        val wrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpi(8), 0, dpi(8), botInset + dpi(8))
+        }
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rr(0xF2F2F2F2.toInt(), dp(14f))
+            clipToOutline = true
+        }
+        val head = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dpi(16), dpi(18), dpi(16), dpi(if (big) 22 else 16))
+        }
+        head.addView(tv(title, 13f, 0xFF8A8A8E.toInt(), true).apply { gravity = Gravity.CENTER })
+        if (sub != null) head.addView(tv(sub, 13f, 0xFF8A8A8E.toInt()).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dpi(if (big) 14 else 8), 0, 0)
+        })
+        card.addView(head)
+        val rh = dpi(if (big) 56 else 50)
+        val ts = if (big) 20f else 17f
+        var gone = false
+        fun dismiss(after: () -> Unit) {
+            if (gone) return
+            gone = true
+            dim.animate().alpha(0f).setDuration(220).start()
+            wrap.animate().translationY(wrap.height.toFloat()).setDuration(260).setInterpolator(IOS_EASE).withEndAction {
+                o.removeView(dim); o.removeView(wrap); after()
+            }.start()
+        }
+        for (b in buttons) {
+            card.addView(hairline(), llp(MATCH, 1))
+            card.addView(tv(b.label, ts, if (b.style == 2) C.RED else accent, b.style == 1).apply {
+                gravity = Gravity.CENTER
+                background = pressBg()
+                setOnClickListener { dismiss { b.action("") } }
+            }, llp(MATCH, rh))
+        }
+        val cc = tv(cancel, ts, accent, true).apply {
+            gravity = Gravity.CENTER
+            background = rr(Color.WHITE, dp(14f))
+            setOnClickListener { dismiss {} }
+        }
+        wrap.addView(card, llp(MATCH, WRAP))
+        wrap.addView(cc, llp(MATCH, rh).apply { topMargin = dpi(8) })
+        dim.tag = Runnable { dismiss {} }
+        dim.setOnClickListener { dismiss {} }
+        o.addView(dim, MATCH, MATCH)
+        o.addView(wrap, flp(MATCH, WRAP, Gravity.BOTTOM))
+        wrap.translationY = root.height.toFloat()
+        dim.animate().alpha(1f).setDuration(220).start()
+        wrap.animate().translationY(0f).setDuration(380).setInterpolator(IOS_EASE).start()
+    }
+
+    fun chooseAction(d: File) {
+        actionSheet("Choose Action", "Choose desired action to perform with this.", listOf(
+            Btn("Install") { confirmInstall(d) },
+            Btn("Custom Install") { customInstall(d) },
+            Btn("Share App") { share(d) },
+            Btn("Delete", 2) { bg("Moved to Recently Deleted") { trashIt(d) } }
+        ))
+    }
+
+    fun customInstall(d: File) {
+        val ts = SimpleDateFormat("d MMM yyyy 'at' HH:mm:ss", Locale.getDefault()).format(Date(d.lastModified()))
+        val sz = String.format(Locale.US, "%.2fMB", d.length() / 1048576.0)
+        actionSheet(d.name, "$ts  $sz", listOf(
+            Btn("signature") { showSignature(d) },
+            Btn("Unsigned install") { confirmInstall(d) },
+            Btn("delete", 2) { bg("Moved to Recently Deleted") { trashIt(d) } }
+        ), "cancel", 0xFF3AAFCB.toInt(), false)
+    }
+
+    /** Popup "would like to install" persis iOS. */
+    fun confirmInstall(d: File) {
+        val name = appLabel(d)
+        alert("\u201CFiles\u201D would like to install \u201C$name\u201D", null, null, 0,
+            listOf(Btn("Cancel", 1), Btn("Install") { install(d) }))
+    }
+
+    fun appLabel(d: File): String {
+        try {
+            val pm = packageManager
+            val ai = pm.getPackageArchiveInfo(d.path, 0)?.applicationInfo
+            if (ai != null) {
+                ai.sourceDir = d.path
+                ai.publicSourceDir = d.path
+                val l = ai.loadLabel(pm).toString()
+                if (l.isNotBlank()) return l
+            }
+        } catch (e: Throwable) {}
+        return d.nameWithoutExtension
+    }
+
+    @Suppress("DEPRECATION")
+    fun sigInfo(path: String): String {
+        val pm = packageManager
+        val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+        val pi = pm.getPackageArchiveInfo(path, flags) ?: return "Not a valid app package. No signature found."
+        val sigs = if (Build.VERSION.SDK_INT >= 28) pi.signingInfo?.apkContentsSigners else pi.signatures
+        if (sigs == null || sigs.isEmpty()) return "${pi.packageName}\nUnsigned"
+        val sha = java.security.MessageDigest.getInstance("SHA-256").digest(sigs[0].toByteArray())
+            .joinToString("") { "%02x".format(it) }.take(32)
+        return "${pi.packageName}\nVersion ${pi.versionName}\nSigned\nSHA-256 $sha…"
+    }
+
+    fun showSignature(d: File) {
+        Thread {
+            val txt = try { sigInfo(d.path) } catch (e: Throwable) { "Cannot read signature." }
+            ui.post { alert("Signature", txt, null, 0, listOf(Btn("OK", 1))) }
+        }.start()
     }
 
     // ---------- recents / trash ----------
