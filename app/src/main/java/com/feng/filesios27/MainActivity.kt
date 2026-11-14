@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -242,6 +243,13 @@ class MainActivity : Activity() {
         showTab(2, false)
         purgeTrash()
         ui.postDelayed({ consumeShare() }, 400)
+        if (needInstallPerm() && !prefs.getBoolean("askedInstall", false)) {
+            prefs.edit().putBoolean("askedInstall", true).apply()
+            ui.postDelayed({
+                alert("Allow Installing Apps", "Files needs permission to install apps from your files.", null, 0,
+                    listOf(Btn("Not Now"), Btn("Settings", 1) { openInstallSettings() }))
+            }, 900)
+        }
     }
 
     // ---------- bottom bar ----------
@@ -738,24 +746,28 @@ class MainActivity : Activity() {
     }
 
     // ---------- popup menu ----------
-    fun showMenu(ax: Float, ay: Float, top: List<Mi>?, items: List<Mi>) {
+    fun showMenu(ax: Float, ay: Float, top: List<Mi>?, items: List<Mi>, preview: File? = null) {
         val o = overlay ?: return
         hideKb()
-        val w = dpi(250)
+        val w = dpi(270)
         val dim = View(this).apply { setBackgroundColor(0x33000000); alpha = 0f; isClickable = true }
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = rr(0xF5FAFAFA.toInt(), dp(16f))
+            background = rr(0xF2F2F2F4.toInt(), dp(16f))
             clipToOutline = true
             elevation = dp(20f)
         }
+        val pv: FileThumbView? = if (preview != null) FileThumbView(this).also { it.bind(preview) } else null
         var gone = false
         fun dismiss(after: (() -> Unit)?) {
             if (gone) return
             gone = true
             dim.animate().alpha(0f).setDuration(140).start()
+            pv?.animate()?.alpha(0f)?.setDuration(140)?.start()
             card.animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(140).withEndAction {
-                o.removeView(dim); o.removeView(card); after?.invoke()
+                o.removeView(dim); o.removeView(card)
+                if (pv != null) o.removeView(pv)
+                after?.invoke()
             }.start()
         }
         dim.tag = Runnable { dismiss(null) }
@@ -777,11 +789,19 @@ class MainActivity : Activity() {
             card.addView(r)
             card.addView(hairline(), llp(MATCH, 1))
         }
+        var prevRow = false
         for (m in items) {
             when {
-                m.sep -> card.addView(View(this).apply { setBackgroundColor(0x14000000) }, llp(MATCH, dpi(6)))
-                m.header -> card.addView(tv(m.label, 13f, C.GRAY).apply { setPadding(dpi(16), dpi(10), dpi(16), dpi(4)) })
+                m.sep -> {
+                    card.addView(View(this).apply { setBackgroundColor(0x1F000000) }, llp(MATCH, dpi(8)))
+                    prevRow = false
+                }
+                m.header -> {
+                    card.addView(tv(m.label, 13f, C.GRAY).apply { setPadding(dpi(16), dpi(10), dpi(16), dpi(4)) })
+                    prevRow = false
+                }
                 else -> {
+                    if (prevRow) card.addView(hairline(), llp(MATCH, 1))
                     val col = if (m.destructive) C.RED else Color.BLACK
                     val row = LinearLayout(this).apply {
                         gravity = Gravity.CENTER_VERTICAL
@@ -789,13 +809,14 @@ class MainActivity : Activity() {
                         background = pressBg()
                         setOnClickListener { dismiss { m.action() } }
                     }
-                    row.addView(tv(m.label, 16f, col), llp(0, WRAP, 1f))
+                    row.addView(tv(m.label, 17f, col), llp(0, WRAP, 1f))
                     when {
                         m.dot != 0 -> row.addView(View(this).apply { background = oval(m.dot) }, llp(dpi(16), dpi(16)))
                         m.check -> row.addView(icon(P.CHECK, Color.BLACK, 18))
-                        m.icon != null -> row.addView(icon(m.icon, col, 20))
+                        m.icon != null -> row.addView(icon(m.icon, col, 22))
                     }
-                    card.addView(row, llp(MATCH, dpi(46)))
+                    card.addView(row, llp(MATCH, dpi(44)))
+                    prevRow = true
                 }
             }
         }
@@ -804,12 +825,24 @@ class MainActivity : Activity() {
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
         )
         val h = card.measuredHeight
+        val pvW = dpi(86)
+        val pvH = if (pv != null) dpi(112) else 0
+        val gap = if (pv != null) dpi(14) else 0
         val x = ax.coerceIn(dpi(12).toFloat(), (root.width - w - dpi(12)).toFloat())
-        val y = minOf(ay, (root.height - botInset - h - dpi(12)).toFloat()).coerceAtLeast((topInset + dpi(8)).toFloat())
+        val y = minOf(ay, (root.height - botInset - h - pvH - gap - dpi(12)).toFloat()).coerceAtLeast((topInset + dpi(8)).toFloat())
         o.addView(dim, MATCH, MATCH)
+        if (pv != null) {
+            o.addView(pv, flp(pvW, pvH))
+            pv.x = x + (w - pvW) / 2f
+            pv.y = y
+            pv.scaleX = 0.6f
+            pv.scaleY = 0.6f
+            pv.alpha = 0f
+            pv.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(300).setInterpolator(OvershootInterpolator(1.1f)).start()
+        }
         o.addView(card, flp(w, WRAP))
         card.x = x
-        card.y = y
+        card.y = y + pvH + gap
         card.pivotX = w / 2f
         card.pivotY = 0f
         card.scaleX = 0.6f
@@ -820,7 +853,7 @@ class MainActivity : Activity() {
     }
 
     // ---------- iOS alert ----------
-    fun alert(title: String, msg: String?, initial: String?, selEnd: Int, buttons: List<Btn>) {
+    fun alert(title: String, msg: String?, initial: String?, selEnd: Int, buttons: List<Btn>, selStart: Int = 0) {
         val o = overlay ?: return
         val dim = View(this).apply { setBackgroundColor(0x55000000); alpha = 0f; isClickable = true }
         val card = LinearLayout(this).apply {
@@ -883,7 +916,7 @@ class MainActivity : Activity() {
         val e = ed
         if (e != null) e.post {
             e.requestFocus()
-            e.setSelection(0, selEnd.coerceIn(0, e.text.length))
+            e.setSelection(selStart.coerceIn(0, e.text.length), selEnd.coerceIn(0, e.text.length))
             (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(e, 0)
         }
     }
@@ -917,34 +950,28 @@ class MainActivity : Activity() {
     fun contextMenu(f: File, cell: View, kind: Int = 0) {
         val loc = IntArray(2)
         cell.getLocationOnScreen(loc)
-        if (kind == 3) { trashMenu(f, loc[0] + cell.width / 2f - dpi(125), loc[1] + cell.height - dpi(8).toFloat()); return }
+        val x = loc[0] + cell.width / 2f - dpi(135)
+        val y = loc[1] + cell.height - dpi(8).toFloat()
+        if (kind == 3) { trashMenu(f, x, y); return }
         val ext = FileOps.ext(f)
-        val top = listOf(
-            Mi("Copy", P.COPY) { clip = Pair(listOf(f), false); toast("Copied") },
-            Mi("Move", P.FOLDER) { clip = Pair(listOf(f), true); toast("Open a folder, tap ••• then Paste") },
-            Mi("Share", P.SHARE) { share(f) }
-        )
         val items = ArrayList<Mi>()
+        items.add(Mi("Copy", P.COPY) { clip = Pair(listOf(f), false); toast("Copied") })
+        items.add(Mi("Duplicate", P.DUP) { bg("Duplicated") { FileOps.copy(f, f.parentFile!!) } })
+        items.add(Mi("Move", P.FOLDER) { clip = Pair(listOf(f), true); toast("Open a folder, tap ••• then Paste") })
+        items.add(Mi("Delete", P.TRASH, destructive = true) { bg("Moved to Recently Deleted") { trashIt(f) } })
+        items.add(Mi(sep = true))
+        items.add(Mi("Info", P.INFO) { info(f) })
         if (f.isDirectory) items.add(Mi("Open", P.FOLDER) { pushPage(ListPage(f, 0, f.name, true).view) })
         else items.add(Mi("Quick Look", P.EYE) { openFile(f) })
-        items.add(Mi("Get Info", P.INFO) { info(f) })
+        items.add(Mi("Tags", P.TAG) { tagMenu(f, x, y) })
         items.add(Mi("Rename", P.PENCIL) { rename(f) })
-        if (ext == "zip") items.add(Mi("Extract", P.UNZIP) { extract(f) })
-        if (ext == "apk") items.add(Mi("Install", P.DOWNLOAD) { install(f) })
-        items.add(Mi("Compress", P.ARCHIVE) { bg("Compressed") { FileOps.zip(listOf(f), f.parentFile!!) } })
-        items.add(Mi("Duplicate", P.DUP) { bg("Duplicated") { FileOps.copy(f, f.parentFile!!) } })
-        items.add(Mi("New Folder with Item", P.NEWFOLDER) {
-            bg(null) {
-                val d = FileOps.unique(f.parentFile!!, "New Folder", true)
-                d.mkdir()
-                FileOps.move(f, d)
-            }
-        })
         items.add(Mi(sep = true))
-        items.add(Mi("Tags…", P.TAG) { tagMenu(f, loc[0] + cell.width / 2f - dpi(125), loc[1] + cell.height.toFloat()) })
-        items.add(Mi(sep = true))
-        items.add(Mi("Delete", P.TRASH, destructive = true) { bg("Moved to Recently Deleted") { trashIt(f) } })
-        showMenu(loc[0] + cell.width / 2f - dpi(125), loc[1] + cell.height - dpi(8).toFloat(), top, items)
+        if (ext in INSTALLABLE) items.add(Mi("Install", P.DOWNLOAD) { openOther(f) })
+        items.add(Mi("Share", P.SHARE) { share(f) })
+        if (ext in FileOps.IMG) items.add(Mi("Markup", P.MARKUP) { markup(f) })
+        if (ext == "zip") items.add(Mi("Uncompress", P.UNZIP) { extract(f) })
+        else items.add(Mi("Compress", P.ARCHIVE) { bg("Compressed") { FileOps.zip(listOf(f), f.parentFile!!) } })
+        showMenu(x, y, null, items, f)
     }
 
     fun tagMenu(f: File, x: Float, y: Float) {
@@ -976,12 +1003,177 @@ class MainActivity : Activity() {
         bg("Extracted") { FileOps.unzip(f, f.parentFile!!) }
     }
 
+    fun lastOpened(f: File): Long? {
+        for (line in prefs.getString("recent", "")!!.split("\n")) {
+            val i = line.indexOf('|')
+            if (i < 0) continue
+            if (line.substring(i + 1) == f.path) return line.substring(0, i).toLongOrNull()
+        }
+        return null
+    }
+
     fun info(f: File) {
         Thread {
-            val sz = FileOps.size(FileOps.dirSize(f))
-            val s = "Kind: ${FileOps.kind(f)}\nSize: $sz\nWhere: ${f.parent}\nModified: ${SimpleDateFormat("d MMM yyyy, HH:mm", Locale.getDefault()).format(Date(f.lastModified()))}"
-            ui.post { alert(f.name, s, null, 0, listOf(Btn("Done", 1))) }
+            val sz = FileOps.dirSize(f)
+            var created = f.lastModified()
+            try {
+                created = java.nio.file.Files.readAttributes(f.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java).creationTime().toMillis()
+            } catch (e: Throwable) {}
+            ui.post { showInfo(f, sz, created) }
         }.start()
+    }
+
+    fun showInfo(f: File, sz: Long, created: Long) {
+        val o = overlay ?: return
+        hideKb()
+        val sh = (root.height * 0.9f).toInt()
+        val dim = View(this).apply { setBackgroundColor(0x66000000); alpha = 0f; isClickable = true }
+        val sheet = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                setColor(C.BG)
+                cornerRadii = floatArrayOf(dp(14f), dp(14f), dp(14f), dp(14f), 0f, 0f, 0f, 0f)
+            }
+            clipToOutline = true
+            elevation = dp(20f)
+        }
+        var gone = false
+        fun close() {
+            if (gone) return
+            gone = true
+            dim.animate().alpha(0f).setDuration(250).start()
+            sheet.animate().translationY(sh.toFloat()).setDuration(300).setInterpolator(IOS_EASE).withEndAction {
+                o.removeView(dim); o.removeView(sheet)
+            }.start()
+        }
+        dim.tag = Runnable { close() }
+        dim.setOnClickListener { close() }
+
+        val head = FrameLayout(this).apply { setBackgroundColor(0xF2F9F9F9.toInt()) }
+        head.addView(tv("Info", 17f, Color.BLACK, true), flp(WRAP, WRAP, Gravity.CENTER))
+        head.addView(tv("Done", 17f, C.BLUE, true).apply {
+            setPadding(dpi(16), dpi(14), dpi(16), dpi(14))
+            setOnClickListener { close() }
+        }, flp(WRAP, WRAP, Gravity.END or Gravity.CENTER_VERTICAL))
+        sheet.addView(head, llp(MATCH, dpi(52)))
+        sheet.addView(hairline(), llp(MATCH, 1))
+
+        val sv = ScrollView(this)
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpi(20), dpi(20), dpi(20), botInset + dpi(24))
+        }
+        sv.addView(col)
+        col.addView(FileThumbView(this).also { it.bind(f) }, llp(MATCH, dpi(190)))
+        col.addView(tv(f.name, 22f, Color.BLACK, true).apply { setPadding(0, dpi(16), 0, dpi(2)) })
+        col.addView(tv(FileOps.kind(f) + " - " + FileOps.size(sz), 15f, C.GRAY))
+        if (!f.isDirectory) col.addView(tv("OPEN", 15f, Color.WHITE, true).apply {
+            gravity = Gravity.CENTER
+            background = rr(C.BLUE, dp(18f))
+            setPadding(dpi(22), dpi(8), dpi(22), dpi(8))
+            setOnClickListener { close(); ui.postDelayed({ openFile(f) }, 330) }
+        }, llp(WRAP, WRAP).apply { topMargin = dpi(14) })
+        col.addView(hairline(), llp(MATCH, 1).apply { topMargin = dpi(20) })
+
+        val ih = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dpi(16), 0, dpi(8)) }
+        ih.addView(tv("Information", 20f, Color.BLACK, true), llp(0, WRAP, 1f))
+        val more = tv("Show More", 15f, C.BLUE)
+        ih.addView(more)
+        col.addView(ih)
+
+        fun row(k: String, v: String, blue: Boolean = false): View {
+            val r = LinearLayout(this).apply { setPadding(0, dpi(10), 0, dpi(10)) }
+            r.addView(tv(k, 15f, C.GRAY), llp(dpi(90), WRAP))
+            r.addView(tv(v, 15f, if (blue) C.BLUE else Color.BLACK).apply { gravity = Gravity.END }, llp(0, WRAP, 1f))
+            val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            box.addView(hairline(), llp(MATCH, 1))
+            box.addView(r)
+            return box
+        }
+        val dfm = SimpleDateFormat("d MMMM yyyy 'at' HH:mm", Locale.getDefault())
+        val where = locationOf(f)
+        val base = when (where) {
+            "iCloud Drive" -> icloudDir
+            "Recently Deleted" -> trashDir
+            else -> Environment.getExternalStorageDirectory()
+        }
+        val rel = (f.parentFile?.path ?: "").removePrefix(base.path).trim('/')
+        val whereStr = if (rel.isEmpty()) where else where + " > " + rel.split('/').joinToString(" > ")
+        col.addView(row("Kind", FileOps.kind(f)))
+        col.addView(row("Size", FileOps.size(sz)))
+        val extra = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        extra.addView(row("Created", dfm.format(Date(created))))
+        extra.addView(row("Modified", dfm.format(Date(f.lastModified()))))
+        val lo = lastOpened(f)
+        if (lo != null) extra.addView(row("Last opened", dfm.format(Date(lo))))
+        extra.addView(row("Where", whereStr, true))
+        col.addView(extra)
+        more.setOnClickListener {
+            val open = extra.visibility == View.VISIBLE
+            extra.visibility = if (open) View.GONE else View.VISIBLE
+            more.text = if (open) "Show More" else "Show Less"
+        }
+
+        col.addView(hairline(), llp(MATCH, 1).apply { topMargin = dpi(20) })
+        val th = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dpi(16), 0, dpi(8)) }
+        th.addView(tv("Tags", 20f, Color.BLACK, true), llp(0, WRAP, 1f))
+        val cur = tagOf(f)
+        val idx = C.tagColors.indexOf(cur)
+        th.addView(tv(if (idx >= 0) C.tagNames[idx] else "Add Tags", 15f, C.BLUE).apply {
+            setOnClickListener { tagMenu(f, root.width / 2f - dpi(135), root.height / 2f) }
+        })
+        col.addView(th)
+
+        sheet.addView(sv, llp(MATCH, 0, 1f))
+        o.addView(dim, MATCH, MATCH)
+        o.addView(sheet, flp(MATCH, sh, Gravity.BOTTOM))
+        sheet.translationY = sh.toFloat()
+        dim.animate().alpha(1f).setDuration(250).start()
+        sheet.animate().translationY(0f).setDuration(420).setInterpolator(IOS_EASE).start()
+    }
+
+    fun markup(f: File) {
+        val mv = MarkupView(this)
+        var bmp: Bitmap? = null
+        val done = tv("Done", 17f, C.BLUE, true).apply { gravity = Gravity.CENTER }
+        showViewer("Markup", true, done) { v ->
+            val iv = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER }
+            v.addView(iv, MATCH, MATCH)
+            v.addView(mv, MATCH, MATCH)
+            Thread { val b = Thumbs.decode(f, 2048); ui.post { bmp = b; iv.setImageBitmap(b) } }.start()
+            val tools = LinearLayout(this).apply {
+                gravity = Gravity.CENTER
+                background = rr(0xCC2C2C2E.toInt(), dp(28f))
+                setPadding(dpi(16), dpi(10), dpi(16), dpi(10))
+            }
+            for (c in intArrayOf(0xFFFF3B30.toInt(), 0xFF007AFF.toInt(), 0xFF34C759.toInt(), 0xFFFFCC00.toInt(), Color.WHITE)) {
+                tools.addView(View(this).apply {
+                    background = oval(c)
+                    setOnClickListener { mv.color = c }
+                }, llp(dpi(32), dpi(32)).apply { setMargins(dpi(8), 0, dpi(8), 0) })
+            }
+            tools.addView(tv("Undo", 16f, Color.WHITE).apply {
+                setPadding(dpi(12), 0, dpi(4), 0)
+                setOnClickListener { mv.undo() }
+            })
+            v.addView(tools, flp(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = botInset + dpi(24) })
+            done.setOnClickListener {
+                val b = bmp
+                if (b != null && mv.strokes.isNotEmpty()) {
+                    val out = mv.render(b, iv.width, iv.height)
+                    Thread {
+                        try {
+                            val e = FileOps.ext(f)
+                            val jpg = e == "jpg" || e == "jpeg"
+                            val dst = FileOps.unique(f.parentFile!!, f.nameWithoutExtension + " markup." + (if (jpg) e else "png"))
+                            FileOutputStream(dst).use { out.compress(if (jpg) Bitmap.CompressFormat.JPEG else Bitmap.CompressFormat.PNG, 95, it) }
+                            ui.post { reloadAll(); toast("Markup saved as a copy") }
+                        } catch (x: Throwable) { ui.post { toast("Cannot save markup") } }
+                    }.start()
+                }
+                closeViewer()
+            }
+        }
     }
 
     fun paste(dir: File) {
@@ -1003,15 +1195,42 @@ class MainActivity : Activity() {
         startActivity(Intent.createChooser(i, f.name))
     }
 
-    fun install(f: File) {
-        if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+    val INSTALLABLE = setOf("apk", "apks", "xapk", "apkm")
+
+    fun needInstallPerm() = Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()
+
+    fun openInstallSettings() {
+        try {
             startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
-            toast("Allow installs from Files, then try again")
+        } catch (e: Exception) {
+            try { startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS)) } catch (x: Exception) { toast("Open Settings manually") }
+        }
+    }
+
+    /** Popup gagal instal ala iOS: OK / Settings. */
+    fun unableToInstall(f: File, msg: String) {
+        alert("Unable To Install", "\"${f.name}\"\n\n$msg", null, 0, listOf(Btn("OK"), Btn("Settings", 1) { openInstallSettings() }))
+    }
+
+    fun install(f: File) {
+        if (needInstallPerm()) {
+            unableToInstall(f, "Files isn't allowed to install apps yet. Tap Settings and turn on \"Allow from this source\".")
             return
         }
-        val i = Intent(Intent.ACTION_VIEW).setDataAndType(uriOf(f), "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        try { startActivity(i) } catch (e: Exception) { toast("Cannot install this file") }
+        if (FileOps.ext(f) == "apk") {
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uriOf(f), "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            } catch (e: Exception) { unableToInstall(f, "This file can't be installed.") }
+        } else openWith(f, true)
+    }
+
+    fun openWith(f: File, installer: Boolean = false) {
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(FileOps.ext(f)) ?: "application/octet-stream"
+        try {
+            startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uriOf(f), mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), f.name))
+        } catch (e: Exception) {
+            if (installer) unableToInstall(f, "No app on this phone can install this kind of file.") else toast("No app can open this file")
+        }
     }
 
     fun openFile(f: File) {
@@ -1022,14 +1241,46 @@ class MainActivity : Activity() {
             e in FileOps.VID -> viewerVideo(f)
             e in FileOps.AUD -> viewerAudio(f)
             e in FileOps.TXT -> viewerText(f)
-            e == "zip" -> extract(f)
-            e == "apk" -> alert("Install \"${f.name}\"?", null, null, 0, listOf(Btn("Cancel"), Btn("Install", 1) { install(f) }))
-            else -> {
-                val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(e) ?: "*/*"
-                try {
-                    startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uriOf(f), mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-                } catch (x: Exception) { toast("No app can open this file") }
-            }
+            else -> openOther(f)
+        }
+    }
+
+    /** Semua file selain foto/video/audio/teks: popup ubah nama -> Done -> popup Install/Extract/Open. */
+    fun openOther(f: File) {
+        val dot = f.name.lastIndexOf('.')
+        val bak = FileOps.ext(f) == "bak" && dot > 0
+        val start = if (bak) dot else 0
+        val end = if (bak) f.name.length else if (dot > 0) dot else f.name.length
+        alert("Rename", "Change the name or keep it, then tap Done.", f.name, end, listOf(Btn("Cancel"), Btn("Done", 1) { n ->
+            val nn = n.trim().replace("/", "_")
+            if (nn.isEmpty()) { toast("A name is required"); openOther(f) }
+            else try {
+                var d = f
+                if (nn != f.name) {
+                    val t = File(f.parentFile, nn)
+                    if (t.exists()) throw Exception("Name already taken")
+                    if (!f.renameTo(t)) throw Exception("Cannot rename")
+                    val tg = prefs.getInt("t:" + f.path, 0)
+                    if (tg != 0) prefs.edit().remove("t:" + f.path).putInt("t:" + t.path, tg).apply()
+                    d = t
+                }
+                reloadAll()
+                followUp(d, true)
+            } catch (e: Exception) { toast(e.message ?: "Cannot rename") }
+        }), start)
+    }
+
+    fun followUp(d: File, open: Boolean) {
+        addRecent(d)
+        val e = FileOps.ext(d)
+        val cancel = Btn("Cancel")
+        when {
+            e in INSTALLABLE -> alert("Install \"${d.name}\"?", null, null, 0, listOf(cancel, Btn("Install", 1) { install(d) }))
+            e in FileOps.IMG || e in FileOps.VID || e in FileOps.AUD || e in FileOps.TXT ->
+                if (open) openFile(d) else toast("Downloaded")
+            e == "zip" -> alert("Extract \"${d.name}\"?", null, null, 0, listOf(cancel, Btn("Extract", 1) { extract(d) }))
+            else -> alert("Open \"${d.name}\"?", "Android can't install or run this file type by itself. It will be opened with another app.", null, 0,
+                listOf(cancel, Btn("Open", 1) { openWith(d) }))
         }
     }
 
@@ -1202,11 +1453,8 @@ class MainActivity : Activity() {
     }
 
     fun finishSave(dst: File) {
-        addRecent(dst)
         reloadAll()
-        if (FileOps.ext(dst) == "apk") {
-            alert("Install \"${dst.name}\"?", "The file was downloaded.", null, 0, listOf(Btn("Cancel"), Btn("Install", 1) { install(dst) }))
-        } else toast("Downloaded")
+        followUp(dst, false)
     }
 
     fun consumeShare() {

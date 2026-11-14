@@ -13,6 +13,7 @@ import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.LruCache
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.PathInterpolator
@@ -88,6 +89,7 @@ object P {
     const val PAUSE = "M6,4h4v16h-4z M14,4h4v16h-4z"
     const val SHAREDFOLDER = "M3,7a2,2 0 0,1 2,-2h4l2,2h8a2,2 0 0,1 2,2v8a2,2 0 0,1 -2,2h-14a2,2 0 0,1 -2,-2z M12,9.5a1.5,1.5 0 1,0 0.01,0 M9.5,16c0,-2 1.2,-3 2.5,-3s2.5,1 2.5,3"
     const val CLOUD = "M7,18a4,4 0 0,1 -0.5,-8a5.5,5.5 0 0,1 10.7,-1.2a4.2,4.2 0 0,1 0.8,9.2z"
+    const val MARKUP = "M12,3a9,9 0 1,0 0,18a9,9 0 1,0 0,-18 M8.5,16l3.5,-9l3.5,9 M9.8,13h4.4"
     const val NOTE = "M9,18V5l12,-2v13 M9,18a3,3 0 1,1 -6,0a3,3 0 0,1 6,0 M21,16a3,3 0 1,1 -6,0a3,3 0 0,1 6,0"
 }
 
@@ -408,5 +410,50 @@ class IosEditText(ctx: Context) : EditText(ctx) {
             val w = resources.displayMetrics.density * 2.2f
             canvas.drawRoundRect(cx - w / 2, cy, cx + w / 2, cy + ch, w / 2, w / 2, paint)
         }
+    }
+}
+
+/** Kanvas coret-coret untuk Markup. */
+class MarkupView(ctx: Context) : View(ctx) {
+    val strokes = ArrayList<Pair<Path, Int>>()
+    var color = 0xFFFF3B30.toInt()
+    private var cur: Path? = null
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 5f * ctx.resources.displayMetrics.density
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+
+    override fun onDraw(c: Canvas) {
+        for ((p, col) in strokes) { paint.color = col; c.drawPath(p, paint) }
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val p = Path().apply { moveTo(e.x, e.y); lineTo(e.x + 0.1f, e.y + 0.1f) }
+                cur = p
+                strokes.add(Pair(p, color))
+                invalidate()
+            }
+            MotionEvent.ACTION_MOVE -> { cur?.lineTo(e.x, e.y); invalidate() }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> cur = null
+        }
+        return true
+    }
+
+    fun undo() { if (strokes.isNotEmpty()) { strokes.removeAt(strokes.size - 1); invalidate() } }
+
+    fun render(src: Bitmap, vw: Int, vh: Int): Bitmap {
+        val out = src.copy(Bitmap.Config.ARGB_8888, true)
+        val s = minOf(vw.toFloat() / out.width, vh.toFloat() / out.height)
+        val ox = (vw - out.width * s) / 2f
+        val oy = (vh - out.height * s) / 2f
+        val c = Canvas(out)
+        c.scale(1f / s, 1f / s)
+        c.translate(-ox, -oy)
+        for ((p, col) in strokes) { paint.color = col; c.drawPath(p, paint) }
+        return out
     }
 }
