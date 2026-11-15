@@ -267,6 +267,13 @@ class GlassBackdropView(ctx: Context, private val source: View, private val corn
         clipToOutline = true
     }
 
+    // Penting: jangan ikut membesarkan induk (WRAP_CONTENT); ukuran hanya dipakai saat sudah pasti.
+    override fun onMeasure(w: Int, h: Int) {
+        val ww = if (View.MeasureSpec.getMode(w) == View.MeasureSpec.EXACTLY) View.MeasureSpec.getSize(w) else 0
+        val hh = if (View.MeasureSpec.getMode(h) == View.MeasureSpec.EXACTLY) View.MeasureSpec.getSize(h) else 0
+        setMeasuredDimension(ww, hh)
+    }
+
     override fun onDraw(c: Canvas) {
         if (Build.VERSION.SDK_INT < 31) { c.drawColor(0xE6F2F2F7.toInt()); return }
         getLocationInWindow(loc)
@@ -612,4 +619,34 @@ class MarkupView(ctx: Context) : View(ctx) {
         for ((p, col) in strokes) { paint.color = col; c.drawPath(p, paint) }
         return out
     }
+}
+
+/** Ikon bar bawah ala iOS (terisi): 0 = jam, 1 = dua orang, 2 = folder. */
+class TabIcon(private val kind: Int, col: Int) : Drawable() {
+    private val paths = arrayOf(
+        PathParser.createPathFromPathData("M12,2.5a9.5,9.5 0 1,0 0,19a9.5,9.5 0 1,0 0,-19z"),
+        PathParser.createPathFromPathData("M9,5.5a3,3 0 1,0 0.01,0z M2.5,19c0,-3.6 2.8,-5.8 6.5,-5.8s6.5,2.2 6.5,5.8z M17,6.5a2.5,2.5 0 1,0 0.01,0z M16.3,13.4c3,0.2 5.2,1.9 5.2,5.1h-4.3c0,-2 -0.3,-3.6 -0.9,-5.1z"),
+        PathParser.createPathFromPathData(P.FOLDER)
+    )
+    private val hands = PathParser.createPathFromPathData("M12,7v5.5h4")
+    private val line = PathParser.createPathFromPathData("M3,10.5h18")
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = col }
+    private val st = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+
+    override fun draw(c: Canvas) {
+        val b = bounds
+        val s = b.width() / 24f
+        c.save()
+        c.translate(b.left.toFloat(), b.top.toFloat())
+        c.scale(s, s)
+        c.drawPath(paths[kind], fill)
+        if (kind == 0) { st.color = Color.WHITE; st.strokeWidth = 1.9f; c.drawPath(hands, st) }
+        if (kind == 2) { st.color = 0x59FFFFFF; st.strokeWidth = 1.1f; c.drawPath(line, st) }
+        c.restore()
+    }
+
+    override fun setAlpha(a: Int) { fill.alpha = a }
+    override fun setColorFilter(f: ColorFilter?) { fill.colorFilter = f }
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
 }

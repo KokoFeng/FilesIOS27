@@ -292,19 +292,21 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(dpi(6), dpi(6), dpi(6), dpi(6))
-            background = GlassDrawable(corner, 0x59FFFFFF, 0x33FFFFFF)
+            background = GlassDrawable(corner, 0x8CFFFFFF.toInt(), 0x5EFFFFFF)
         }
         val names = arrayOf("Recents", "Shared", "Browse")
-        val icons = arrayOf(P.CLOCK, P.SHAREDFOLDER, P.FOLDER)
         for (i in 0..2) {
             val cell = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 setPadding(dpi(4), dpi(8), dpi(4), dpi(6))
-                tag = icons[i]
+                tag = i
             }
-            cell.addView(icon(icons[i], C.GRAY, 26))
-            cell.addView(tv(names[i], 11f, C.GRAY, true).apply {
+            cell.addView(ImageView(this).apply {
+                setImageDrawable(TabIcon(i, Color.BLACK))
+                layoutParams = ViewGroup.LayoutParams(dpi(24), dpi(24))
+            })
+            cell.addView(tv(names[i], 10f, Color.BLACK, true).apply {
                 maxLines = 1
                 setSingleLine()
                 ellipsize = null
@@ -317,7 +319,7 @@ class MainActivity : Activity() {
         holder.addView(b, flp(MATCH, WRAP))
         barView = b
         barHolder = holder
-        root.addView(holder, flp(minOf(sw - dpi(40), dpi(340)), WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = botInset + dpi(10) })
+        root.addView(holder, flp(minOf(maxOf((sw * 0.7f).toInt(), dpi(250)), sw - dpi(24)), WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = botInset + dpi(10) })
     }
 
     fun updateBar() {
@@ -325,9 +327,9 @@ class MainActivity : Activity() {
         for (i in 0..2) {
             val cell = b.getChildAt(i) as LinearLayout
             val sel = i == tab
-            val col = if (sel) C.BLUE else C.GRAY
+            val col = if (sel) C.BLUE else Color.BLACK
             cell.background = if (sel) GlassDrawable(dp(28f), 0x24000000, 0x14000000) else null
-            (cell.getChildAt(0) as ImageView).setImageDrawable(IconDrawable(cell.tag as String, col))
+            (cell.getChildAt(0) as ImageView).setImageDrawable(TabIcon(cell.tag as Int, col))
             (cell.getChildAt(1) as TextView).setTextColor(col)
         }
     }
