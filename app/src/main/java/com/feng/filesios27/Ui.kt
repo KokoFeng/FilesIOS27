@@ -2,6 +2,8 @@ package com.feng.filesios27
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.content.res.Resources
+import android.os.Build
 import android.graphics.*
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
@@ -16,6 +18,7 @@ import android.util.LruCache
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.view.animation.PathInterpolator
 import android.widget.EditText
 import android.widget.ImageView
@@ -90,6 +93,14 @@ object P {
     const val SHAREDFOLDER = "M3,7a2,2 0 0,1 2,-2h4l2,2h8a2,2 0 0,1 2,2v8a2,2 0 0,1 -2,2h-14a2,2 0 0,1 -2,-2z M12,9.5a1.5,1.5 0 1,0 0.01,0 M9.5,16c0,-2 1.2,-3 2.5,-3s2.5,1 2.5,3"
     const val CLOUD = "M7,18a4,4 0 0,1 -0.5,-8a5.5,5.5 0 0,1 10.7,-1.2a4.2,4.2 0 0,1 0.8,9.2z"
     const val MARKUP = "M12,3a9,9 0 1,0 0,18a9,9 0 1,0 0,-18 M8.5,16l3.5,-9l3.5,9 M9.8,13h4.4"
+    const val DESKTOP = "M4,5h16a1,1 0 0,1 1,1v10a1,1 0 0,1 -1,1h-16a1,1 0 0,1 -1,-1v-10a1,1 0 0,1 1,-1z M7,13.5h10"
+    const val DOCGLYPH = "M7,3h7l4,4v13a1,1 0 0,1 -1,1h-10a1,1 0 0,1 -1,-1v-16a1,1 0 0,1 1,-1z M14,3v4h4"
+    const val DLCIRCLE = "M12,3a9,9 0 1,0 0,18a9,9 0 1,0 0,-18 M12,8v8 M8.5,12.5l3.5,3.5l3.5,-3.5"
+    const val PHOTO = "M4,5h16v14h-16z M4,16l5,-5l4,4l3,-3l4,4 M15.5,9.5a1,1 0 1,0 0.01,0"
+    const val FILM = "M4,5h16v14h-16z M10,9l5,3l-5,3z"
+    const val CAMERA = "M4,8h3l2,-3h6l2,3h3v11h-16z M12,10a3.5,3.5 0 1,0 0.01,0"
+    const val PACKAGE = "M12,3l8,4v10l-8,4l-8,-4v-10z M4,7l8,4l8,-4 M12,11v10"
+    const val APPA = "M12,4l-6,14 M12,4l6,14 M8,13.5h8"
     const val NOTE = "M9,18V5l12,-2v13 M9,18a3,3 0 1,1 -6,0a3,3 0 0,1 6,0 M21,16a3,3 0 1,1 -6,0a3,3 0 0,1 6,0"
 }
 
@@ -125,24 +136,50 @@ fun Context.icon(path: String, col: Int, sizeDp: Int, stroke: Boolean = true, sw
         layoutParams = ViewGroup.LayoutParams(dpi(sizeDp), dpi(sizeDp))
     }
 
-/** Folder biru ala iOS. */
+/** Gambar folder & dokumen dari user (res/drawable-nodpi). */
+object Assets {
+    val folder: Bitmap by lazy { BitmapFactory.decodeResource(Thumbs.ctx.resources, R.drawable.ic_folder) }
+    val doc: Bitmap by lazy { BitmapFactory.decodeResource(Thumbs.ctx.resources, R.drawable.ic_doc) }
+}
+
+object Glyph {
+    private val m = HashMap<String, IconDrawable>()
+    fun get(path: String, col: Int, stroke: Boolean = true, sw: Float = 1.8f): IconDrawable =
+        m.getOrPut("$path/$col/$stroke/$sw") { IconDrawable(path, col, stroke, sw) }
+}
+
+/** Ikon tengah folder sesuai fungsinya. */
+fun folderGlyph(name: String): String? {
+    val n = name.lowercase()
+    return when {
+        n.contains("download") || n.contains("unduh") -> P.DLCIRCLE
+        n.contains("document") || n.contains("dokumen") || n == "docs" -> P.DOCGLYPH
+        n.contains("desktop") -> P.DESKTOP
+        n.contains("music") || n.contains("audio") || n.contains("lagu") || n.contains("ringtone") -> P.NOTE
+        n.contains("movie") || n.contains("video") || n.contains("film") -> P.FILM
+        n.contains("dcim") || n.contains("camera") || n.contains("kamera") -> P.CAMERA
+        n.contains("picture") || n.contains("photo") || n.contains("image") || n.contains("screenshot") || n.contains("gambar") || n.contains("wallpaper") -> P.PHOTO
+        n.contains("apk") || n.contains("apps") -> P.PACKAGE
+        n.contains("backup") -> P.CLOCK
+        n.contains("android") -> P.PHONE
+        n.contains("icloud") -> P.CLOUD
+        n.contains("deleted") -> P.TRASH
+        n.contains("zip") || n.contains("archive") -> P.ARCHIVE
+        else -> null
+    }
+}
+
 class FolderDrawable : Drawable() {
-    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     override fun draw(c: Canvas) {
+        val bm = Assets.folder
         val b = bounds
-        val w = b.width().toFloat()
-        val h = b.height().toFloat()
-        val r = w * 0.1f
-        c.save()
-        c.translate(b.left.toFloat(), b.top.toFloat())
-        p.shader = null
-        p.color = 0xFF3FA5E8.toInt()
-        c.drawRoundRect(RectF(0f, 0f, w * 0.42f, h * 0.4f), r, r, p)
-        c.drawRoundRect(RectF(0f, h * 0.12f, w, h), r, r, p)
-        p.shader = LinearGradient(0f, h * 0.22f, 0f, h, 0xFF8AD3FA.toInt(), 0xFF5BBBF2.toInt(), Shader.TileMode.CLAMP)
-        c.drawRoundRect(RectF(0f, h * 0.24f, w, h), r, r, p)
-        p.shader = null
-        c.restore()
+        val s = minOf(b.width().toFloat() / bm.width, b.height().toFloat() / bm.height)
+        val dw = bm.width * s
+        val dh = bm.height * s
+        val l = b.left + (b.width() - dw) / 2
+        val t = b.top + (b.height() - dh) / 2
+        c.drawBitmap(bm, null, RectF(l, t, l + dw, t + dh), p)
     }
 
     override fun setAlpha(a: Int) {}
@@ -151,8 +188,99 @@ class FolderDrawable : Drawable() {
     override fun getOpacity() = PixelFormat.TRANSLUCENT
 }
 
+/** Liquid glass: isi tembus, kilau atas, dan pinggiran terang (rim) seperti kaca Apple. */
+class GlassDrawable(
+    private val corner: Float,
+    private val top: Int = 0x66FFFFFF,
+    private val bottom: Int = 0x40FFFFFF,
+    private val dark: Boolean = false
+) : Drawable() {
+    private val d = Resources.getSystem().displayMetrics.density
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val r = RectF()
+
+    private fun rad(): Float = minOf(corner, minOf(bounds.width(), bounds.height()) / 2f)
+
+    override fun draw(c: Canvas) {
+        val b = bounds
+        if (b.isEmpty) return
+        val rd = rad()
+        r.set(b)
+        p.style = Paint.Style.FILL
+        p.shader = LinearGradient(0f, r.top, 0f, r.bottom, top, bottom, Shader.TileMode.CLAMP)
+        c.drawRoundRect(r, rd, rd, p)
+        p.shader = LinearGradient(
+            0f, r.top, 0f, r.top + r.height() * 0.5f,
+            if (dark) 0x26FFFFFF else 0x66FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP
+        )
+        c.drawRoundRect(r, rd, rd, p)
+        val sw = 1.3f * d
+        r.set(b.left + sw / 2, b.top + sw / 2, b.right - sw / 2, b.bottom - sw / 2)
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = sw
+        val rim = if (dark) intArrayOf(0x99FFFFFF.toInt(), 0x14FFFFFF, 0x14FFFFFF, 0x66FFFFFF)
+        else intArrayOf(0xF2FFFFFF.toInt(), 0x30FFFFFF, 0x30FFFFFF, 0xCCFFFFFF.toInt())
+        p.shader = LinearGradient(
+            b.left.toFloat(), b.top.toFloat(), b.right.toFloat(), b.bottom.toFloat(),
+            rim, floatArrayOf(0f, 0.32f, 0.68f, 1f), Shader.TileMode.CLAMP
+        )
+        c.drawRoundRect(r, maxOf(0f, rd - sw / 2), maxOf(0f, rd - sw / 2), p)
+        val s2 = 3f * d
+        r.set(b.left + sw + s2 / 2, b.top + sw + s2 / 2, b.right - sw - s2 / 2, b.bottom - sw - s2 / 2)
+        p.strokeWidth = s2
+        p.shader = LinearGradient(
+            0f, b.top.toFloat(), 0f, b.bottom.toFloat(),
+            if (dark) 0x14FFFFFF else 0x2EFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP
+        )
+        val ir = maxOf(0f, rd - sw - s2 / 2)
+        c.drawRoundRect(r, ir, ir, p)
+        p.shader = null
+    }
+
+    override fun getOutline(outline: Outline) {
+        outline.setRoundRect(bounds, rad())
+        outline.setAlpha(0.9f)
+    }
+
+    override fun setAlpha(a: Int) {}
+    override fun setColorFilter(f: ColorFilter?) {}
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/**
+ * Latar kaca: menggambar ulang isi halaman di belakangnya lalu mem-blur dan menambah saturasi
+ * (backdrop blur). Butuh Android 12+; di bawah itu jadi kaca putih tembus.
+ */
+class GlassBackdropView(ctx: Context, private val source: View, private val corner: Float) : View(ctx) {
+    private val loc = IntArray(2)
+    private val sloc = IntArray(2)
+    private val sat = Paint().apply { colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(1.7f) }) }
+
+    init {
+        if (Build.VERSION.SDK_INT >= 31) {
+            setRenderEffect(RenderEffect.createBlurEffect(26f, 26f, Shader.TileMode.CLAMP))
+        }
+        outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, corner) }
+        }
+        clipToOutline = true
+    }
+
+    override fun onDraw(c: Canvas) {
+        if (Build.VERSION.SDK_INT < 31) { c.drawColor(0xE6F2F2F7.toInt()); return }
+        getLocationInWindow(loc)
+        source.getLocationInWindow(sloc)
+        c.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), sat)
+        c.translate((sloc[0] - loc[0]).toFloat(), (sloc[1] - loc[1]).toFloat())
+        source.draw(c)
+        c.restore()
+    }
+}
+
 object Thumbs {
     lateinit var ctx: Context
+    var onLoaded: (() -> Unit)? = null
     private val cache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
@@ -177,7 +305,7 @@ object Thumbs {
                 }
             } catch (t: Throwable) { null }
             if (b != null) cache.put(key, b)
-            main.post { cb(b) }
+            main.post { cb(b); onLoaded?.invoke() }
         }
     }
 
@@ -233,8 +361,17 @@ class FileThumbView(ctx: Context) : View(ctx) {
         Thumbs.load(f, 256) { b -> if (file == f) { bmp = b; invalidate() } }
     }
 
-    private val zipIc = IconDrawable(P.ARCHIVE, 0xFF8E8E93.toInt())
-    private val txtIc = IconDrawable(P.LIST, 0xFF8E8E93.toInt())
+    private val bp = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val APKS = setOf("apk", "apks", "xapk", "apkm")
+    private val ARCH = setOf("zip", "rar", "7z", "tar", "gz", "xz", "tgz")
+    private val EXES = setOf("exe", "msi", "bat", "dll", "cmd")
+
+    private fun fit(bm: Bitmap, w: Float, h: Float, fw: Float, fh: Float): RectF {
+        val s = minOf(w * fw / bm.width, h * fh / bm.height)
+        val dw = bm.width * s
+        val dh = bm.height * s
+        return RectF(w / 2 - dw / 2, h / 2 - dh / 2, w / 2 + dw / 2, h / 2 + dh / 2)
+    }
 
     override fun onDraw(canvas: Canvas) {
         val f = file ?: return
@@ -242,21 +379,31 @@ class FileThumbView(ctx: Context) : View(ctx) {
         val h = height.toFloat()
         val d = resources.displayMetrics.density
         if (f.isDirectory) {
-            folder.setBounds(0, (h * 0.1f).toInt(), width, (h * 0.92f).toInt())
-            folder.draw(canvas)
+            val fb = Assets.folder
+            val r = fit(fb, w, h, 0.98f, 0.98f)
+            canvas.drawBitmap(fb, null, r, bp)
+            val g = folderGlyph(f.name)
+            if (g != null) {
+                val s = r.height() * 0.34f
+                val ic = Glyph.get(g, 0xB02A78AE.toInt(), true, 1.9f)
+                val cx = r.centerX()
+                val cy = r.top + r.height() * 0.64f
+                ic.setBounds((cx - s / 2).toInt(), (cy - s / 2).toInt(), (cx + s / 2).toInt(), (cy + s / 2).toInt())
+                ic.draw(canvas)
+            }
             return
         }
         val e = f.extension.lowercase()
         val b = bmp
-        // Foto / video: thumbnail apa adanya (rasio asli), seperti Files iOS
-        if (b != null && e != "apk") {
+        // Foto / video: thumbnail apa adanya (rasio asli)
+        if (b != null && e !in APKS) {
             val s = minOf(w * 0.92f / b.width, h * 0.96f / b.height)
             val dw = b.width * s
             val dh = b.height * s
             val r = RectF(w / 2 - dw / 2, h / 2 - dh / 2, w / 2 + dw / 2, h / 2 + dh / 2)
             canvas.save()
             canvas.clipPath(Path().apply { addRoundRect(r, 3 * d, 3 * d, Path.Direction.CW) })
-            canvas.drawBitmap(b, null, r, p)
+            canvas.drawBitmap(b, null, r, bp)
             canvas.restore()
             p.style = Paint.Style.STROKE
             p.strokeWidth = 1f
@@ -264,72 +411,81 @@ class FileThumbView(ctx: Context) : View(ctx) {
             canvas.drawRoundRect(r, 3 * d, 3 * d, p)
             return
         }
-        // Halaman dokumen dengan sudut terlipat
-        val ph = h * 0.96f
-        val pw = minOf(ph * 0.74f, w * 0.9f)
-        val l = w / 2 - pw / 2
-        val t = h / 2 - ph / 2
-        val rg = l + pw
-        val bt = t + ph
-        val fold = pw * 0.28f
-        val rad = pw * 0.07f
-        val page = Path().apply {
-            moveTo(l + rad, t); lineTo(rg - fold, t); lineTo(rg, t + fold); lineTo(rg, bt - rad)
-            quadTo(rg, bt, rg - rad, bt); lineTo(l + rad, bt); quadTo(l, bt, l, bt - rad)
-            lineTo(l, t + rad); quadTo(l, t, l + rad, t); close()
+        // Dokumen: gambar halaman dari user + ikon tengah sesuai jenis file
+        val db = Assets.doc
+        val r = fit(db, w, h, 0.96f, 0.96f)
+        canvas.drawBitmap(db, null, r, bp)
+        drawBadge(canvas, e, r.left + r.width() * 0.49f, r.top + r.height() * 0.55f, r.width() * 0.52f, b, r)
+    }
+
+    private fun drawBadge(c: Canvas, e: String, cx: Float, cy: Float, s: Float, b: Bitmap?, page: RectF) {
+        val r = RectF(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2)
+        val rad = s * 0.22f
+        if (e in FileOps.AUD) {
+            val fr = floatArrayOf(0.3f, 0.6f, 1f, 0.7f, 0.5f, 0.85f, 0.35f)
+            val bw = page.width() * 0.055f
+            val gap = page.width() * 0.085f
+            val tot = fr.size * bw + (fr.size - 1) * gap
+            val mh = page.height() * 0.34f
+            p.style = Paint.Style.FILL
+            p.shader = null
+            p.color = C.BLUE
+            for (i in fr.indices) {
+                val x = cx - tot / 2 + i * (bw + gap)
+                val bh = mh * fr[i]
+                c.drawRoundRect(RectF(x, cy - bh / 2, x + bw, cy + bh / 2), bw / 2, bw / 2, p)
+            }
+            return
+        }
+        var top = 0
+        var bot = 0
+        var glyph: String? = null
+        var text: String? = null
+        var fillGlyph = false
+        when {
+            e in APKS -> {
+                if (b != null) {
+                    c.save()
+                    c.clipPath(Path().apply { addRoundRect(r, rad, rad, Path.Direction.CW) })
+                    c.drawBitmap(b, null, r, bp)
+                    c.restore()
+                    return
+                }
+                top = 0xFF7BE495.toInt(); bot = 0xFF34C759.toInt(); glyph = P.PACKAGE
+            }
+            e == "ipa" -> { top = 0xFF5AC8FA.toInt(); bot = 0xFF1E7CF2.toInt(); glyph = P.APPA }
+            e in ARCH -> { top = 0xFFFFB340.toInt(); bot = 0xFFFF8A00.toInt(); glyph = P.ARCHIVE }
+            e == "bak" || e == "old" || e == "tmp" -> { top = 0xFFB4B4BC.toInt(); bot = 0xFF8E8E98.toInt(); glyph = P.CLOCK }
+            e in EXES -> { top = 0xFF4A90E2.toInt(); bot = 0xFF2B5FB8.toInt(); glyph = P.GRID }
+            e in FileOps.VID -> { top = 0xFF8B7BFF.toInt(); bot = 0xFF5856D6.toInt(); glyph = P.PLAY; fillGlyph = true }
+            e in FileOps.TXT -> { top = 0xFFC2C2C9.toInt(); bot = 0xFF98989F.toInt(); glyph = P.LIST }
+            e == "pdf" -> { top = 0xFFFF6B5E.toInt(); bot = 0xFFE0352B.toInt(); text = "PDF" }
+            e == "doc" || e == "docx" -> { top = 0xFF5AA9FF.toInt(); bot = 0xFF1F6FE0.toInt(); text = "DOC" }
+            e == "xls" || e == "xlsx" || e == "csv" -> { top = 0xFF5EDB86.toInt(); bot = 0xFF1FA64A.toInt(); text = "XLS" }
+            e == "ppt" || e == "pptx" -> { top = 0xFFFFB340.toInt(); bot = 0xFFE8650A.toInt(); text = "PPT" }
+            else -> {
+                if (e.isNotEmpty()) {
+                    tp.color = 0xFF9A9AA2.toInt()
+                    tp.textSize = s * 0.34f
+                    c.drawText(e.uppercase().take(4), cx, cy + tp.textSize * 0.35f, tp)
+                }
+                return
+            }
         }
         p.style = Paint.Style.FILL
-        p.color = Color.WHITE
-        canvas.drawPath(page, p)
-        p.style = Paint.Style.STROKE
-        p.strokeWidth = 1.2f
-        p.color = 0xFFE0E0E5.toInt()
-        canvas.drawPath(page, p)
-        p.style = Paint.Style.FILL
-        p.color = 0xFFEDEDF1.toInt()
-        canvas.drawPath(Path().apply { moveTo(rg - fold, t); lineTo(rg - fold, t + fold); lineTo(rg, t + fold); close() }, p)
-        val cx = w / 2
-        val cy = h / 2 + fold * 0.25f
-        when {
-            e in FileOps.AUD -> {
-                // gelombang suara biru
-                val fr = floatArrayOf(0.3f, 0.6f, 1f, 0.7f, 0.5f, 0.85f, 0.35f)
-                val bw = pw * 0.045f
-                val gap = pw * 0.075f
-                val tot = fr.size * bw + (fr.size - 1) * gap
-                val mh = ph * 0.34f
-                p.style = Paint.Style.FILL
-                p.color = C.BLUE
-                for (i in fr.indices) {
-                    val x = cx - tot / 2 + i * (bw + gap)
-                    val bh = mh * fr[i]
-                    canvas.drawRoundRect(RectF(x, cy - bh / 2, x + bw, cy + bh / 2), bw / 2, bw / 2, p)
-                }
-            }
-            e == "apk" && b != null -> {
-                val s = pw * 0.55f
-                val r = RectF(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2)
-                canvas.save()
-                canvas.clipPath(Path().apply { addRoundRect(r, s * 0.22f, s * 0.22f, Path.Direction.CW) })
-                canvas.drawBitmap(b, null, r, p)
-                canvas.restore()
-            }
-            e in FileOps.VID -> {
-                val s = pw * 0.3f
-                p.style = Paint.Style.FILL
-                p.color = C.BLUE
-                canvas.drawPath(Path().apply { moveTo(cx - s / 3, cy - s / 2); lineTo(cx + s / 1.7f, cy); lineTo(cx - s / 3, cy + s / 2); close() }, p)
-            }
-            e == "zip" -> {
-                val s = (pw * 0.5f).toInt()
-                zipIc.setBounds((cx - s / 2).toInt(), (cy - s / 2).toInt(), (cx + s / 2).toInt(), (cy + s / 2).toInt())
-                zipIc.draw(canvas)
-            }
-            e in FileOps.TXT -> {
-                val s = (pw * 0.5f).toInt()
-                txtIc.setBounds((cx - s / 2).toInt(), (cy - s / 2).toInt(), (cx + s / 2).toInt(), (cy + s / 2).toInt())
-                txtIc.draw(canvas)
-            }
+        p.shader = LinearGradient(0f, r.top, 0f, r.bottom, top, bot, Shader.TileMode.CLAMP)
+        c.drawRoundRect(r, rad, rad, p)
+        p.shader = null
+        if (glyph != null) {
+            val g = Glyph.get(glyph, Color.WHITE, !fillGlyph, 2.0f)
+            val ins = s * 0.24f
+            g.setBounds((r.left + ins).toInt(), (r.top + ins).toInt(), (r.right - ins).toInt(), (r.bottom - ins).toInt())
+            g.draw(c)
+        }
+        if (text != null) {
+            tp.color = Color.WHITE
+            tp.textSize = s * 0.30f
+            c.drawText(text, cx, cy + tp.textSize * 0.35f, tp)
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.feng.filesios27
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -9,6 +10,9 @@ import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Outline
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
@@ -19,10 +23,12 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.speech.RecognizerIntent
 import android.text.InputType
 import android.text.TextUtils
+import android.view.Choreographer
 import android.view.Gravity
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -30,6 +36,7 @@ import android.view.ScaleGestureDetector
 import android.view.VelocityTracker
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.view.animation.OvershootInterpolator
@@ -102,6 +109,13 @@ class MainActivity : Activity() {
     val prefs by lazy { getSharedPreferences("files", MODE_PRIVATE) }
     val df = SimpleDateFormat("M/d/yy", Locale.getDefault())
     val recentTs = HashMap<String, Long>()
+    var glassView: GlassBackdropView? = null
+    var barHolder: View? = null
+    var glassUntil = 0L
+    var glassRunning = false
+    var blurOn = false
+    var curBlur = 0f
+    var blurAnim: ValueAnimator? = null
     var pendingShare: Intent? = null
     val trashDir: File by lazy { File(getExternalFilesDir(null) ?: filesDir, "RecentlyDeleted").also { it.mkdirs() } }
     val icloudDir: File by lazy { File(Environment.getExternalStorageDirectory(), "iCloud Drive").also { it.mkdirs() } }
@@ -120,7 +134,8 @@ class MainActivity : Activity() {
     fun hairline(v: Boolean = false): View = View(this).apply { setBackgroundColor(0x1F000000) }
 
     fun circle(path: String, dark: Boolean, onClick: (View) -> Unit): FrameLayout = FrameLayout(this).apply {
-        background = oval(if (dark) 0x66606060 else 0xE6FFFFFF.toInt())
+        background = if (dark) GlassDrawable(dp(20f), 0x66707070, 0x44505050, true) else GlassDrawable(dp(20f), 0xD9FFFFFF.toInt(), 0xA6FFFFFF.toInt())
+        pressFx(this)
         elevation = if (dark) 0f else dp(2f)
         addView(icon(path, if (dark) Color.WHITE else Color.BLACK, 20), flp(dpi(20), dpi(20), Gravity.CENTER))
         setOnClickListener { onClick(it) }
@@ -145,6 +160,7 @@ class MainActivity : Activity() {
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
         Thumbs.ctx = applicationContext
+        Thumbs.onLoaded = { kickGlass(250) }
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
         window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
@@ -237,6 +253,10 @@ class MainActivity : Activity() {
         pages = p
         val o = FrameLayout(this).apply { elevation = dp(40f) }
         overlay = o
+        o.setOnHierarchyChangeListener(object : ViewGroup.OnHierarchyChangeListener {
+            override fun onChildViewAdded(parent: View?, child: View?) { ui.post { syncBlur() } }
+            override fun onChildViewRemoved(parent: View?, child: View?) { ui.post { syncBlur() } }
+        })
         root.addView(p, MATCH, MATCH)
         buildBar()
         root.addView(o, MATCH, MATCH)
@@ -255,12 +275,24 @@ class MainActivity : Activity() {
     // ---------- bottom bar ----------
     fun buildBar() {
         val sw = resources.displayMetrics.widthPixels
+        val corner = dp(36f)
+        val holder = FrameLayout(this).apply {
+            elevation = dp(10f)
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(v: View, o: Outline) {
+                    o.setRoundRect(0, 0, v.width, v.height, corner)
+                    o.setAlpha(0.6f)
+                }
+            }
+        }
+        val glass = GlassBackdropView(this, pages!!, corner)
+        glassView = glass
+        holder.addView(glass, flp(MATCH, MATCH))
         val b = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(dpi(6), dpi(6), dpi(6), dpi(6))
-            background = rr(0xEBFFFFFF.toInt(), dp(36f))
-            elevation = dp(10f)
+            background = GlassDrawable(corner, 0x59FFFFFF, 0x33FFFFFF)
         }
         val names = arrayOf("Recents", "Shared", "Browse")
         val icons = arrayOf(P.CLOCK, P.SHAREDFOLDER, P.FOLDER)
@@ -278,11 +310,14 @@ class MainActivity : Activity() {
                 ellipsize = null
                 gravity = Gravity.CENTER
             }, llp(WRAP, WRAP))
+            pressFx(cell)
             cell.setOnClickListener { if (tab != i) showTab(i, true) else popToRoot() }
             b.addView(cell, llp(0, WRAP, 1f))
         }
+        holder.addView(b, flp(MATCH, WRAP))
         barView = b
-        root.addView(b, flp(minOf(sw - dpi(40), dpi(340)), WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = botInset + dpi(10) })
+        barHolder = holder
+        root.addView(holder, flp(minOf(sw - dpi(40), dpi(340)), WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = botInset + dpi(10) })
     }
 
     fun updateBar() {
@@ -291,15 +326,69 @@ class MainActivity : Activity() {
             val cell = b.getChildAt(i) as LinearLayout
             val sel = i == tab
             val col = if (sel) C.BLUE else C.GRAY
-            cell.background = if (sel) rr(0x14000000, dp(28f)) else null
+            cell.background = if (sel) GlassDrawable(dp(28f), 0x24000000, 0x14000000) else null
             (cell.getChildAt(0) as ImageView).setImageDrawable(IconDrawable(cell.tag as String, col))
             (cell.getChildAt(1) as TextView).setTextColor(col)
         }
     }
 
+    // ---------- liquid glass helpers ----------
+    /** Gambar ulang kaca belakang bar selama ada gerakan (scroll, transisi). */
+    fun kickGlass(ms: Long = 1200) {
+        glassUntil = maxOf(glassUntil, SystemClock.uptimeMillis() + ms)
+        if (glassRunning) return
+        glassRunning = true
+        Choreographer.getInstance().postFrameCallback(object : Choreographer.FrameCallback {
+            override fun doFrame(t: Long) {
+                glassView?.invalidate()
+                if (SystemClock.uptimeMillis() < glassUntil) Choreographer.getInstance().postFrameCallback(this)
+                else glassRunning = false
+            }
+        })
+    }
+
+    fun pressFx(v: View) {
+        v.setOnTouchListener { view, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> view.animate().scaleX(1.1f).scaleY(1.1f).setDuration(180)
+                    .setInterpolator(OvershootInterpolator(2f)).start()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> view.animate().scaleX(1f).scaleY(1f).setDuration(220)
+                    .setInterpolator(IOS_EASE).start()
+            }
+            false
+        }
+    }
+
+    /** Blur latar belakang (halaman + bar) saat ada popup. Android 12+. */
+    fun syncBlur() {
+        if (Build.VERSION.SDK_INT < 31) return
+        val o = overlay ?: return
+        var need = false
+        for (i in 0 until o.childCount) {
+            val c = o.getChildAt(i)
+            if (c.tag is Runnable && c !== viewerView) need = true
+        }
+        if (need == blurOn) return
+        blurOn = need
+        blurAnim?.cancel()
+        blurAnim = ValueAnimator.ofFloat(curBlur, if (need) 28f else 0f).apply {
+            duration = 280
+            addUpdateListener { setBlur(it.animatedValue as Float) }
+            start()
+        }
+    }
+
+    fun setBlur(r: Float) {
+        curBlur = r
+        val eff = if (r < 0.5f) null else RenderEffect.createBlurEffect(r, r, Shader.TileMode.CLAMP)
+        pages?.setRenderEffect(eff)
+        barHolder?.setRenderEffect(eff)
+    }
+
     // ---------- page stack ----------
     fun showTab(i: Int, anim: Boolean) {
         tab = i
+        kickGlass(600)
         val pg = pages ?: return
         val v: View = when (i) {
             0 -> ListPage(null, 1, "Recents", false).view
@@ -319,6 +408,7 @@ class MainActivity : Activity() {
     }
 
     fun pushPage(v: View) {
+        kickGlass(700)
         val pg = pages ?: return
         val w = root.width.toFloat()
         val prev = stack.last()
@@ -332,6 +422,7 @@ class MainActivity : Activity() {
 
     fun popPage() {
         if (stack.size < 2) return
+        kickGlass(700)
         hideKb()
         val w = root.width.toFloat()
         val v = stack.removeAt(stack.size - 1)
@@ -353,6 +444,7 @@ class MainActivity : Activity() {
     private var vt: VelocityTracker? = null
 
     override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+        if (started) kickGlass(1500)
         if (started && stack.size > 1 && !blocking()) {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> if (e.x < dpi(22)) {
@@ -400,7 +492,7 @@ class MainActivity : Activity() {
         val internal = Environment.getExternalStorageDirectory()
         val sb = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            background = rr(0x1F767680, dp(10f))
+            background = GlassDrawable(dp(19f), 0xB3FFFFFF.toInt(), 0x80FFFFFF.toInt()); elevation = dp(3f)
             setPadding(dpi(8), 0, dpi(8), 0)
             setOnClickListener { pushPage(ListPage(internal, 0, "On My iPhone", true, true).view) }
         }
@@ -595,7 +687,7 @@ class MainActivity : Activity() {
 
             val sb = LinearLayout(ctx).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                background = rr(0x1F767680, dp(10f))
+                background = GlassDrawable(dp(19f), 0xB3FFFFFF.toInt(), 0x80FFFFFF.toInt()); elevation = dp(3f)
                 setPadding(dpi(8), 0, dpi(8), 0)
             }
             sb.addView(icon(P.SEARCH, C.GRAY, 18))
@@ -705,6 +797,7 @@ class MainActivity : Activity() {
 
         fun refresh() {
             applyMode()
+            kickGlass(400)
             la.notifyDataSetChanged()
             ga.notifyDataSetChanged()
             empty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
@@ -753,7 +846,7 @@ class MainActivity : Activity() {
         val dim = View(this).apply { setBackgroundColor(0x33000000); alpha = 0f; isClickable = true }
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = rr(0xF2F2F2F4.toInt(), dp(16f))
+            background = GlassDrawable(dp(22f), 0xE8F6F6F8.toInt(), 0xDCF0F0F3.toInt())
             clipToOutline = true
             elevation = dp(20f)
         }
