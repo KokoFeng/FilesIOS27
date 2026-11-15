@@ -16,6 +16,7 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.pdf.PdfRenderer
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaPlayer
 import android.net.Uri
@@ -27,6 +28,7 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.Settings
+import android.provider.Telephony
 import android.speech.RecognizerIntent
 import android.text.InputType
 import android.text.TextUtils
@@ -47,6 +49,7 @@ import android.widget.BaseAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.GridView
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
@@ -1273,13 +1276,168 @@ class MainActivity : Activity() {
 
     fun uriOf(f: File): Uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", f)
 
-    fun share(f: File) {
-        if (f.isDirectory) { toast("Compress the folder first"); return }
+    fun share(f: File) = shareSheet(f)
+
+    fun shareSystem(f: File, pkg: String? = null) {
         val cur = prefs.getString("shared", "")!!.split("\n").filter { it.isNotBlank() && it != f.path }
         prefs.edit().putString("shared", (listOf(f.path) + cur).take(100).joinToString("\n")).apply()
         val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(FileOps.ext(f)) ?: "*/*"
         val i = Intent(Intent.ACTION_SEND).setType(mime).putExtra(Intent.EXTRA_STREAM, uriOf(f)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (pkg != null) {
+            i.setPackage(pkg)
+            try { startActivity(i); return } catch (e: Exception) { i.setPackage(null) }
+        }
         startActivity(Intent.createChooser(i, f.name))
+    }
+
+    fun shareMail(f: File) {
+        val i = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"))
+            .putExtra(Intent.EXTRA_STREAM, uriOf(f)).putExtra(Intent.EXTRA_SUBJECT, f.name)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try { startActivity(i) } catch (e: Exception) { toast("No mail app found") }
+    }
+
+    fun saveToGallery(f: File, type: String) {
+        bg("Saved") {
+            val dir = Environment.getExternalStoragePublicDirectory(type)
+            dir.mkdirs()
+            val dst = FileOps.copy(f, dir)
+            android.media.MediaScannerConnection.scanFile(this, arrayOf(dst.path), null, null)
+        }
+    }
+
+    fun saveToFiles(f: File) {
+        bg("Saved to Downloads") {
+            val d = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            d.mkdirs()
+            FileOps.copy(f, d)
+        }
+    }
+
+    fun sizeLocal(b: Long): String = FileOps.size(b).replace('.', java.text.DecimalFormatSymbols.getInstance().decimalSeparator)
+
+    /** Share sheet persis iOS: baris aplikasi (AirDrop, Messages, Mail, ...) + kartu aksi. */
+    fun shareSheet(f: File) {
+        if (f.isDirectory) { toast("Compress the folder first"); return }
+        val o = overlay ?: return
+        hideKb()
+        val dim = View(this).apply { setBackgroundColor(0x55000000); alpha = 0f; isClickable = true }
+        val sheet = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                setColor(C.BG)
+                cornerRadii = floatArrayOf(dp(22f), dp(22f), dp(22f), dp(22f), 0f, 0f, 0f, 0f)
+            }
+            clipToOutline = true
+            elevation = dp(20f)
+        }
+        var gone = false
+        fun close(after: () -> Unit) {
+            if (gone) return
+            gone = true
+            dim.animate().alpha(0f).setDuration(250).start()
+            sheet.animate().translationY(sheet.height.toFloat()).setDuration(300).setInterpolator(IOS_EASE).withEndAction {
+                o.removeView(dim); o.removeView(sheet); after()
+            }.start()
+        }
+        dim.tag = Runnable { close {} }
+        dim.setOnClickListener { close {} }
+
+        val head = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpi(18), dpi(14), dpi(16), dpi(14))
+            setBackgroundColor(0xF2F9F9F9.toInt())
+        }
+        head.addView(FileThumbView(this).also { it.bind(f) }, llp(dpi(40), dpi(48)))
+        val hc = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        hc.addView(tv(f.name, 17f, Color.BLACK, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.MIDDLE })
+        hc.addView(tv(FileOps.kind(f) + " · " + sizeLocal(f.length()), 15f, C.GRAY))
+        head.addView(hc, llp(0, WRAP, 1f).apply { marginStart = dpi(12); marginEnd = dpi(8) })
+        head.addView(FrameLayout(this).apply {
+            background = oval(0xFFE3E3E8.toInt())
+            addView(icon(P.CLOSE, 0xFF6C6C70.toInt(), 16), flp(dpi(16), dpi(16), Gravity.CENTER))
+            setOnClickListener { close {} }
+        }, llp(dpi(34), dpi(34)))
+        sheet.addView(head)
+        sheet.addView(hairline(), llp(MATCH, 1))
+
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpi(16), dpi(16), dpi(16), botInset + dpi(24))
+        }
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun appItem(label: String, iconView: View, act: () -> Unit) {
+            val cell = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(dpi(4), 0, dpi(4), 0)
+                setOnClickListener { close { act() } }
+            }
+            cell.addView(iconView, llp(dpi(62), dpi(62)))
+            cell.addView(tv(label, 12f, Color.BLACK).apply { gravity = Gravity.CENTER; maxLines = 1; setPadding(0, dpi(6), 0, 0) })
+            row.addView(cell, llp(dpi(76), WRAP))
+        }
+        fun shareIc(kind: Int) = ImageView(this).apply { setImageDrawable(ShareIconDrawable(kind)) }
+        appItem("AirDrop", shareIc(0)) { shareSystem(f) }
+        appItem("Messages", shareIc(1)) { shareSystem(f, Telephony.Sms.getDefaultSmsPackage(this)) }
+        appItem("Mail", shareIc(2)) { shareMail(f) }
+        val rnd = object : ViewOutlineProvider() {
+            override fun getOutline(v: View, ol: Outline) { ol.setRoundRect(0, 0, v.width, v.height, dp(14f)) }
+        }
+        val pkgs = listOf("com.whatsapp" to "WhatsApp", "org.telegram.messenger" to "Telegram",
+            "com.facebook.orca" to "Messenger", "com.instagram.android" to "Instagram")
+        for ((pk, nm) in pkgs) {
+            val ic: Drawable? = try { packageManager.getApplicationIcon(pk) } catch (e: Exception) { null }
+            if (ic == null) continue
+            val iv = ImageView(this).apply { setImageDrawable(ic); outlineProvider = rnd; clipToOutline = true }
+            appItem(nm, iv) { shareSystem(f, pk) }
+        }
+        val hs = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        hs.addView(row)
+        content.addView(hs, llp(MATCH, WRAP))
+
+        fun card(items: List<Triple<String, String, () -> Unit>>) {
+            val cd = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = rr(Color.WHITE, dp(14f))
+                clipToOutline = true
+            }
+            for ((i, item) in items.withIndex()) {
+                if (i > 0) cd.addView(hairline(), llp(MATCH, 1).apply { marginStart = dpi(16) })
+                val r = LinearLayout(this).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dpi(16), 0, dpi(16), 0)
+                    background = pressBg()
+                    setOnClickListener { close { item.third() } }
+                }
+                r.addView(tv(item.first, 17f, Color.BLACK), llp(0, WRAP, 1f))
+                r.addView(icon(item.second, Color.BLACK, 22))
+                cd.addView(r, llp(MATCH, dpi(50)))
+            }
+            content.addView(cd, llp(MATCH, WRAP).apply { topMargin = dpi(20) })
+        }
+        card(listOf(Triple("Copy", P.COPY, { clip = Pair(listOf(f), false); toast("Copied") })))
+        val e = FileOps.ext(f)
+        val rows2 = ArrayList<Triple<String, String, () -> Unit>>()
+        if (e in FileOps.VID) rows2.add(Triple("Save Video", P.DOWNLOAD, { saveToGallery(f, Environment.DIRECTORY_MOVIES) }))
+        if (e in FileOps.IMG) rows2.add(Triple("Save Image", P.DOWNLOAD, { saveToGallery(f, Environment.DIRECTORY_PICTURES) }))
+        rows2.add(Triple("Save to Files", P.FOLDER, { saveToFiles(f) }))
+        rows2.add(Triple("Open in…", P.OPENIN, { openWith(f) }))
+        card(rows2)
+
+        val sc = ScrollView(this)
+        sc.addView(content)
+        sheet.addView(sc, llp(MATCH, WRAP))
+        sheet.measure(
+            View.MeasureSpec.makeMeasureSpec(root.width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val hgt = minOf(sheet.measuredHeight, (root.height * 0.88f).toInt())
+        o.addView(dim, MATCH, MATCH)
+        o.addView(sheet, flp(MATCH, hgt, Gravity.BOTTOM))
+        sheet.translationY = hgt.toFloat()
+        dim.animate().alpha(1f).setDuration(250).start()
+        sheet.animate().translationY(0f).setDuration(420).setInterpolator(IOS_EASE).start()
     }
 
     val INSTALLABLE = setOf("apk", "apks", "xapk", "apkm")
@@ -1550,11 +1708,13 @@ class MainActivity : Activity() {
             v.addView(lv, MATCH, MATCH)
             Thread {
                 val rows = ArrayList<Pair<String, String>>()
+                var total = 0L
                 try {
                     java.util.zip.ZipFile(f).use { z ->
                         val en = z.entries()
                         while (en.hasMoreElements() && rows.size < 3000) {
                             val x = en.nextElement()
+                            if (!x.isDirectory && x.size > 0) total += x.size
                             rows.add(Pair(x.name, if (x.isDirectory) "Folder" else FileOps.size(x.size)))
                         }
                     }
@@ -1562,6 +1722,13 @@ class MainActivity : Activity() {
                     rows.add(Pair("This archive can't be listed (only ZIP-based files).", ""))
                 }
                 ui.post {
+                    lv.addHeaderView(tv("${rows.size} items · ${FileOps.size(total)} · tap a file to peek", 13f, C.GRAY).apply {
+                        setPadding(dpi(16), 0, dpi(16), dpi(8))
+                    }, null, false)
+                    lv.setOnItemClickListener { _, _, pos, _ ->
+                        val i = pos - lv.headerViewsCount
+                        if (i >= 0 && i < rows.size) peekEntry(f, rows[i].first)
+                    }
                     lv.adapter = object : BaseAdapter() {
                         override fun getCount() = rows.size
                         override fun getItem(p: Int): Any = rows[p]
@@ -1581,6 +1748,24 @@ class MainActivity : Activity() {
                 }
             }.start()
         }
+    }
+
+    /** Intip satu file di dalam zip tanpa mengekstrak semuanya. */
+    fun peekEntry(zip: File, name: String) {
+        if (name.endsWith("/")) return
+        Thread {
+            try {
+                val dir = File(cacheDir, "peek").also { it.mkdirs() }
+                val out = File(dir, name.substringAfterLast('/'))
+                java.util.zip.ZipFile(zip).use { z ->
+                    val en = z.getEntry(name) ?: throw Exception("Missing entry")
+                    z.getInputStream(en).use { ins -> FileOutputStream(out).use { ins.copyTo(it) } }
+                }
+                ui.post { closeViewer(); ui.postDelayed({ quickLook(out) }, 330) }
+            } catch (e: Throwable) {
+                ui.post { toast("Cannot open this item") }
+            }
+        }.start()
     }
 
     fun viewerPdf(f: File) {

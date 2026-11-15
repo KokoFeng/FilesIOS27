@@ -102,6 +102,8 @@ object P {
     const val CAMERA = "M4,8h3l2,-3h6l2,3h3v11h-16z M12,10a3.5,3.5 0 1,0 0.01,0"
     const val PACKAGE = "M12,3l8,4v10l-8,4l-8,-4v-10z M4,7l8,4l8,-4 M12,11v10"
     const val APPA = "M12,4l-6,14 M12,4l6,14 M8,13.5h8"
+    const val CLOSE = "M6,6L18,18 M18,6L6,18"
+    const val OPENIN = "M14,4h6v6 M20,4l-9,9 M18,14v4a2,2 0 0,1 -2,2h-9a2,2 0 0,1 -2,-2v-9a2,2 0 0,1 2,-2h4"
     const val NOTE = "M9,18V5l12,-2v13 M9,18a3,3 0 1,1 -6,0a3,3 0 0,1 6,0 M21,16a3,3 0 1,1 -6,0a3,3 0 0,1 6,0"
 }
 
@@ -474,9 +476,9 @@ class FileThumbView(ctx: Context) : View(ctx) {
         drawBadge(canvas, e, r.left + r.width() * 0.49f, r.top + r.height() * 0.55f, r.width() * 0.52f, b, r)
     }
 
+    private val labelFace: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+
     private fun drawBadge(c: Canvas, e: String, cx: Float, cy: Float, s: Float, b: Bitmap?, page: RectF) {
-        val r = RectF(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2)
-        val rad = s * 0.22f
         if (e in FileOps.AUD) {
             val fr = floatArrayOf(0.3f, 0.6f, 1f, 0.7f, 0.5f, 0.85f, 0.35f)
             val bw = page.width() * 0.055f
@@ -493,55 +495,11 @@ class FileThumbView(ctx: Context) : View(ctx) {
             }
             return
         }
-        var top = 0
-        var bot = 0
-        var glyph: String? = null
-        var text: String? = null
-        var fillGlyph = false
-        when {
-            e in APKS -> {
-                if (b != null) {
-                    c.save()
-                    c.clipPath(Path().apply { addRoundRect(r, rad, rad, Path.Direction.CW) })
-                    c.drawBitmap(b, null, r, bp)
-                    c.restore()
-                    return
-                }
-                top = 0xFF7BE495.toInt(); bot = 0xFF34C759.toInt(); glyph = P.PACKAGE
-            }
-            e == "ipa" -> { top = 0xFF5AC8FA.toInt(); bot = 0xFF1E7CF2.toInt(); glyph = P.APPA }
-            e in ARCH -> { top = 0xFFFFB340.toInt(); bot = 0xFFFF8A00.toInt(); glyph = P.ARCHIVE }
-            e == "bak" || e == "old" || e == "tmp" -> { top = 0xFFB4B4BC.toInt(); bot = 0xFF8E8E98.toInt(); glyph = P.CLOCK }
-            e in EXES -> { top = 0xFF4A90E2.toInt(); bot = 0xFF2B5FB8.toInt(); glyph = P.GRID }
-            e in FileOps.VID -> { top = 0xFF8B7BFF.toInt(); bot = 0xFF5856D6.toInt(); glyph = P.PLAY; fillGlyph = true }
-            e in FileOps.TXT -> { top = 0xFFC2C2C9.toInt(); bot = 0xFF98989F.toInt(); glyph = P.LIST }
-            e == "pdf" -> { top = 0xFFFF6B5E.toInt(); bot = 0xFFE0352B.toInt(); text = "PDF" }
-            e == "doc" || e == "docx" -> { top = 0xFF5AA9FF.toInt(); bot = 0xFF1F6FE0.toInt(); text = "DOC" }
-            e == "xls" || e == "xlsx" || e == "csv" -> { top = 0xFF5EDB86.toInt(); bot = 0xFF1FA64A.toInt(); text = "XLS" }
-            e == "ppt" || e == "pptx" -> { top = 0xFFFFB340.toInt(); bot = 0xFFE8650A.toInt(); text = "PPT" }
-            else -> {
-                if (e.isNotEmpty()) {
-                    tp.color = 0xFF9A9AA2.toInt()
-                    tp.textSize = s * 0.34f
-                    c.drawText(e.uppercase().take(4), cx, cy + tp.textSize * 0.35f, tp)
-                }
-                return
-            }
-        }
-        p.style = Paint.Style.FILL
-        p.shader = LinearGradient(0f, r.top, 0f, r.bottom, top, bot, Shader.TileMode.CLAMP)
-        c.drawRoundRect(r, rad, rad, p)
-        p.shader = null
-        if (glyph != null) {
-            val g = Glyph.get(glyph, Color.WHITE, !fillGlyph, 2.0f)
-            val ins = s * 0.24f
-            g.setBounds((r.left + ins).toInt(), (r.top + ins).toInt(), (r.right - ins).toInt(), (r.bottom - ins).toInt())
-            g.draw(c)
-        }
-        if (text != null) {
-            tp.color = Color.WHITE
-            tp.textSize = s * 0.30f
-            c.drawText(text, cx, cy + tp.textSize * 0.35f, tp)
+        if (e == "zip" || e == "pdf" || e == "apk") {
+            tp.color = 0xFF3B8EEA.toInt()
+            tp.typeface = labelFace
+            tp.textSize = page.width() * 0.40f
+            c.drawText(e, cx, page.top + page.height() * 0.52f + tp.textSize * 0.34f, tp)
         }
     }
 }
@@ -696,6 +654,77 @@ class TabIcon(private val kind: Int, col: Int) : Drawable() {
 
     override fun setAlpha(a: Int) { fill.alpha = a }
     override fun setColorFilter(f: ColorFilter?) { fill.colorFilter = f }
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/** Ikon aplikasi di baris share: 0 = AirDrop, 1 = Messages, 2 = Mail. */
+class ShareIconDrawable(private val kind: Int) : Drawable() {
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val pa = Path()
+
+    override fun draw(c: Canvas) {
+        val b = bounds
+        if (b.isEmpty) return
+        val w = b.width().toFloat()
+        val h = b.height().toFloat()
+        c.save()
+        c.translate(b.left.toFloat(), b.top.toFloat())
+        val rad = w * 0.225f
+        p.style = Paint.Style.FILL
+        p.color = Color.WHITE
+        p.shader = when (kind) {
+            0 -> null
+            1 -> LinearGradient(0f, 0f, 0f, h, 0xFF67E86B.toInt(), 0xFF2CC24A.toInt(), Shader.TileMode.CLAMP)
+            else -> LinearGradient(0f, 0f, 0f, h, 0xFF55B8FF.toInt(), 0xFF1B76F0.toInt(), Shader.TileMode.CLAMP)
+        }
+        c.drawRoundRect(RectF(0f, 0f, w, h), rad, rad, p)
+        p.shader = null
+        when (kind) {
+            0 -> {
+                p.style = Paint.Style.STROKE
+                p.strokeCap = Paint.Cap.ROUND
+                p.strokeWidth = w * 0.06f
+                p.shader = LinearGradient(0f, 0f, 0f, h, 0xFF4AA3FF.toInt(), 0xFF1E6FE8.toInt(), Shader.TileMode.CLAMP)
+                val cx = w / 2
+                val cy = h * 0.56f
+                for (r in floatArrayOf(0.38f, 0.27f, 0.16f)) {
+                    c.drawArc(RectF(cx - w * r, cy - w * r, cx + w * r, cy + w * r), 135f, 270f, false, p)
+                }
+                p.style = Paint.Style.FILL
+                c.drawCircle(cx, cy, w * 0.045f, p)
+                p.shader = null
+            }
+            1 -> {
+                p.style = Paint.Style.FILL
+                p.color = Color.WHITE
+                c.drawOval(RectF(w * 0.17f, h * 0.22f, w * 0.83f, h * 0.70f), p)
+                pa.reset()
+                pa.moveTo(w * 0.26f, h * 0.58f)
+                pa.lineTo(w * 0.20f, h * 0.80f)
+                pa.lineTo(w * 0.44f, h * 0.67f)
+                pa.close()
+                c.drawPath(pa, p)
+            }
+            else -> {
+                p.style = Paint.Style.STROKE
+                p.color = Color.WHITE
+                p.strokeWidth = w * 0.05f
+                p.strokeJoin = Paint.Join.ROUND
+                p.strokeCap = Paint.Cap.ROUND
+                c.drawRoundRect(RectF(w * 0.2f, h * 0.3f, w * 0.8f, h * 0.7f), w * 0.07f, w * 0.07f, p)
+                pa.reset()
+                pa.moveTo(w * 0.22f, h * 0.34f)
+                pa.lineTo(w * 0.5f, h * 0.54f)
+                pa.lineTo(w * 0.78f, h * 0.34f)
+                c.drawPath(pa, p)
+            }
+        }
+        c.restore()
+    }
+
+    override fun setAlpha(a: Int) {}
+    override fun setColorFilter(f: ColorFilter?) {}
     @Suppress("OVERRIDE_DEPRECATION")
     override fun getOpacity() = PixelFormat.TRANSLUCENT
 }
