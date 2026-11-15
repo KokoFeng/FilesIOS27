@@ -298,7 +298,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(dpi(6), dpi(6), dpi(6), dpi(6))
-            background = GlassDrawable(corner, 0x47FFFFFF, 0x24FFFFFF)
+            background = GlassDrawable(corner, 0x14FFFFFF, 0x0AFFFFFF)
         }
         val names = arrayOf("Recents", "Shared", "Browse")
         for (i in 0..2) {

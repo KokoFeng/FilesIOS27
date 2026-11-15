@@ -260,36 +260,82 @@ class NotifyFrame(ctx: Context) : FrameLayout(ctx) {
     }
 }
 
+/** Parameter efek liquid, mengikuti LiquidScope milik FletchMcKee/liquid. */
+class LiquidParams(
+    var frost: Float = 8f,            // dp, blur latar (Android 12+)
+    var refraction: Float = 0.5f,     // 0..1 seberapa jauh latar dibelokkan (Android 13+)
+    var curve: Float = 0.5f,          // 0..1 kelengkungan lensa pusat vs tepi (Android 13+)
+    var edge: Float = 0.12f,          // kilau pinggiran
+    var tintColor: Int = 0x2EFFFFFF,
+    var saturation: Float = 1.5f,
+    var dispersion: Float = 0.25f,    // aberasi kromatik di tepi (Android 13+)
+    var contrast: Float = 0f
+)
+
 /**
- * Latar kaca dinamis: menggambar ulang isi halaman di belakangnya setiap kali berubah,
- * lalu blur + saturasi (+ refraksi tepi AGSL di Android 13+). Tidak memakai polling:
- * dibuat ulang tepat saat isi halaman berubah (lihat NotifyFrame).
+ * Latar kaca dinamis ala FletchMcKee/liquid: "source" (halaman) direkam ulang setiap berubah,
+ * lalu efek mengambil sampel piksel di belakangnya: frost (blur) -> lensa bola (refraksi + kurva)
+ * -> dispersi -> saturasi/kontras/tint -> kilau tepi.
+ *  - Android 13+ : semua efek (shader AGSL)
+ *  - Android 12  : frost + saturasi (tanpa refraksi/kurva/dispersi)
+ *  - Android 11- : kaca statis tembus
+ * Tidak memakai polling: dibuat ulang tepat saat halaman berubah (lihat NotifyFrame).
+ * View ini bukan keturunan source-nya, jadi tidak ada rekursi gambar.
  */
-class GlassBackdropView(ctx: Context, private val source: View, private val corner: Float) : View(ctx) {
+class GlassBackdropView(
+    ctx: Context,
+    private val source: View,
+    private val corner: Float,
+    private val params: LiquidParams = LiquidParams()
+) : View(ctx) {
     private val loc = IntArray(2)
     private val sloc = IntArray(2)
-    private val sat = Paint().apply { colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(1.8f) }) }
+    private val sat = Paint()
 
     private val AGSL = """
         uniform shader content;
         uniform float2 viewSize;
         uniform float cornerR;
+        uniform float maxOffset;
+        uniform float curve;
+        uniform float dispersion;
+        uniform float edge;
+        uniform float saturation;
+        uniform float contrast;
+        uniform float4 tint;
+
+        float sdRound(float2 p, float2 hs, float r) {
+            float2 q = abs(p) - (hs - float2(r));
+            return length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+        }
+
         half4 main(float2 coord) {
-            float2 c = viewSize * 0.5;
-            float2 p = coord - c;
-            float2 q = abs(p) - (c - float2(cornerR));
-            float d = length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0) - cornerR;
-            float depth = clamp(-d / 24.0, 0.0, 1.0);
-            float bend = (1.0 - depth) * (1.0 - depth);
-            float2 dir = p / max(length(p), 1.0);
-            float2 off = dir * bend * 22.0;
-            half4 r = content.eval(coord - off);
-            half4 g = content.eval(coord - off * 1.08);
-            half4 b = content.eval(coord - off * 1.16);
-            half4 col = half4(r.r, g.g, b.b, g.a);
-            half lift = half(bend * 0.12);
-            col.rgb += half3(lift, lift, lift);
-            return col;
+            float2 hs = viewSize * 0.5;
+            float2 p = coord - hs;
+            float d = sdRound(p, hs, cornerR);
+            float2 g = float2(
+                sdRound(p + float2(1.0, 0.0), hs, cornerR) - sdRound(p - float2(1.0, 0.0), hs, cornerR),
+                sdRound(p + float2(0.0, 1.0), hs, cornerR) - sdRound(p - float2(0.0, 1.0), hs, cornerR));
+            float2 n = g / max(length(g), 0.0001);
+            float bevel = min(viewSize.x, viewSize.y) * 0.5 * (0.35 + 0.65 * curve);
+            float t = clamp(-d / bevel, 0.0, 1.0);
+            float m = maxOffset * pow(1.0 - t, 2.0 + 1.5 * (1.0 - curve));
+            float2 off = n * m;
+            float2 lo = float2(0.5);
+            float2 hi = viewSize - float2(0.5);
+            float4 cr = float4(content.eval(clamp(coord - off * (1.0 - 0.3 * dispersion), lo, hi)));
+            float4 cg = float4(content.eval(clamp(coord - off, lo, hi)));
+            float4 cb = float4(content.eval(clamp(coord - off * (1.0 + 0.3 * dispersion), lo, hi)));
+            float3 rgb = float3(cr.r, cg.g, cb.b);
+            float lum = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+            rgb = mix(float3(lum), rgb, saturation);
+            rgb = (rgb - 0.5) * (1.0 + contrast) + 0.5;
+            rgb = mix(rgb, tint.rgb, tint.a);
+            float rim = 1.0 - clamp(-d / 3.0, 0.0, 1.0);
+            float l1 = max(dot(n, normalize(float2(-0.55, -0.83))), 0.0);
+            float l2 = max(dot(n, normalize(float2(0.55, 0.83))), 0.0) * 0.55;
+            rgb += float3(rim * edge * (l1 + l2));
+            return half4(half3(clamp(rgb, 0.0, 1.0)), half(cg.a));
         }
     """
 
@@ -298,17 +344,39 @@ class GlassBackdropView(ctx: Context, private val source: View, private val corn
             override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, corner) }
         }
         clipToOutline = true
+        if (Build.VERSION.SDK_INT in 31..32) {
+            sat.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(params.saturation) })
+        }
+    }
+
+    /** Panggil setelah mengubah params. */
+    fun applyParams() {
+        buildEffect(width, height)
+        invalidate()
     }
 
     private fun buildEffect(w: Int, h: Int) {
         if (Build.VERSION.SDK_INT < 31 || w <= 0 || h <= 0) return
-        val blur = RenderEffect.createBlurEffect(16f, 16f, Shader.TileMode.CLAMP)
+        val d = resources.displayMetrics.density
+        val br = maxOf(params.frost * d, 0.1f)
+        val blur = RenderEffect.createBlurEffect(br, br, Shader.TileMode.CLAMP)
         var eff: RenderEffect = blur
         if (Build.VERSION.SDK_INT >= 33) {
             try {
                 val sh = RuntimeShader(AGSL)
                 sh.setFloatUniform("viewSize", w.toFloat(), h.toFloat())
                 sh.setFloatUniform("cornerR", minOf(corner, minOf(w, h) / 2f))
+                sh.setFloatUniform("maxOffset", params.refraction * 34f * d)
+                sh.setFloatUniform("curve", params.curve)
+                sh.setFloatUniform("dispersion", params.dispersion)
+                sh.setFloatUniform("edge", params.edge)
+                sh.setFloatUniform("saturation", params.saturation)
+                sh.setFloatUniform("contrast", params.contrast)
+                val t = params.tintColor
+                sh.setFloatUniform(
+                    "tint",
+                    ((t shr 16) and 0xFF) / 255f, ((t shr 8) and 0xFF) / 255f, (t and 0xFF) / 255f, ((t ushr 24) and 0xFF) / 255f
+                )
                 eff = RenderEffect.createChainEffect(RenderEffect.createRuntimeShaderEffect(sh, "content"), blur)
             } catch (t: Throwable) {
                 eff = blur
