@@ -21,6 +21,7 @@ import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.animation.PathInterpolator
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import androidx.core.graphics.PathParser
 import java.io.File
@@ -248,26 +249,78 @@ class GlassDrawable(
     override fun getOpacity() = PixelFormat.TRANSLUCENT
 }
 
+/** Wadah halaman: memberi tahu kaca setiap kali ada anak-cucu yang berubah (scroll, animasi, gambar termuat). */
+class NotifyFrame(ctx: Context) : FrameLayout(ctx) {
+    var onChange: (() -> Unit)? = null
+    override fun onDescendantInvalidated(child: View, target: View) {
+        super.onDescendantInvalidated(child, target)
+        onChange?.invoke()
+    }
+}
+
 /**
- * Latar kaca: menggambar ulang isi halaman di belakangnya lalu mem-blur dan menambah saturasi
- * (backdrop blur). Butuh Android 12+; di bawah itu jadi kaca putih tembus.
+ * Latar kaca dinamis: menggambar ulang isi halaman di belakangnya setiap kali berubah,
+ * lalu blur + saturasi (+ refraksi tepi AGSL di Android 13+). Tidak memakai polling:
+ * dibuat ulang tepat saat isi halaman berubah (lihat NotifyFrame).
  */
 class GlassBackdropView(ctx: Context, private val source: View, private val corner: Float) : View(ctx) {
     private val loc = IntArray(2)
     private val sloc = IntArray(2)
-    private val sat = Paint().apply { colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(1.7f) }) }
+    private val sat = Paint().apply { colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(1.8f) }) }
+
+    private val AGSL = """
+        uniform shader content;
+        uniform float2 viewSize;
+        uniform float cornerR;
+        half4 main(float2 coord) {
+            float2 c = viewSize * 0.5;
+            float2 p = coord - c;
+            float2 q = abs(p) - (c - float2(cornerR));
+            float d = length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0) - cornerR;
+            float depth = clamp(-d / 24.0, 0.0, 1.0);
+            float bend = (1.0 - depth) * (1.0 - depth);
+            float2 dir = p / max(length(p), 1.0);
+            float2 off = dir * bend * 22.0;
+            half4 r = content.eval(coord - off);
+            half4 g = content.eval(coord - off * 1.08);
+            half4 b = content.eval(coord - off * 1.16);
+            half4 col = half4(r.r, g.g, b.b, g.a);
+            half lift = half(bend * 0.12);
+            col.rgb += half3(lift, lift, lift);
+            return col;
+        }
+    """
 
     init {
-        if (Build.VERSION.SDK_INT >= 31) {
-            setRenderEffect(RenderEffect.createBlurEffect(26f, 26f, Shader.TileMode.CLAMP))
-        }
         outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, corner) }
         }
         clipToOutline = true
     }
 
-    // Penting: jangan ikut membesarkan induk (WRAP_CONTENT); ukuran hanya dipakai saat sudah pasti.
+    private fun buildEffect(w: Int, h: Int) {
+        if (Build.VERSION.SDK_INT < 31 || w <= 0 || h <= 0) return
+        val blur = RenderEffect.createBlurEffect(16f, 16f, Shader.TileMode.CLAMP)
+        var eff: RenderEffect = blur
+        if (Build.VERSION.SDK_INT >= 33) {
+            try {
+                val sh = RuntimeShader(AGSL)
+                sh.setFloatUniform("viewSize", w.toFloat(), h.toFloat())
+                sh.setFloatUniform("cornerR", minOf(corner, minOf(w, h) / 2f))
+                eff = RenderEffect.createChainEffect(RenderEffect.createRuntimeShaderEffect(sh, "content"), blur)
+            } catch (t: Throwable) {
+                eff = blur
+            }
+        }
+        setRenderEffect(eff)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
+        super.onSizeChanged(w, h, ow, oh)
+        buildEffect(w, h)
+    }
+
+    // Jangan ikut membesarkan induk (WRAP_CONTENT); ukuran hanya dipakai saat sudah pasti.
     override fun onMeasure(w: Int, h: Int) {
         val ww = if (View.MeasureSpec.getMode(w) == View.MeasureSpec.EXACTLY) View.MeasureSpec.getSize(w) else 0
         val hh = if (View.MeasureSpec.getMode(h) == View.MeasureSpec.EXACTLY) View.MeasureSpec.getSize(h) else 0
@@ -404,7 +457,7 @@ class FileThumbView(ctx: Context) : View(ctx) {
         val b = bmp
         // Foto / video: thumbnail apa adanya (rasio asli)
         if (b != null && e !in APKS) {
-            val s = minOf(w * 0.92f / b.width, h * 0.96f / b.height)
+            val s = minOf(w / b.width, h / b.height)
             val dw = b.width * s
             val dh = b.height * s
             val r = RectF(w / 2 - dw / 2, h / 2 - dh / 2, w / 2 + dw / 2, h / 2 + dh / 2)
@@ -412,10 +465,6 @@ class FileThumbView(ctx: Context) : View(ctx) {
             canvas.clipPath(Path().apply { addRoundRect(r, 3 * d, 3 * d, Path.Direction.CW) })
             canvas.drawBitmap(b, null, r, bp)
             canvas.restore()
-            p.style = Paint.Style.STROKE
-            p.strokeWidth = 1f
-            p.color = 0x22000000
-            canvas.drawRoundRect(r, 3 * d, 3 * d, p)
             return
         }
         // Dokumen: gambar halaman dari user + ikon tengah sesuai jenis file

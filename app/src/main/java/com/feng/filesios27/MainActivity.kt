@@ -14,6 +14,7 @@ import android.graphics.Outline
 import android.graphics.RenderEffect
 import android.graphics.Shader
 import android.graphics.Typeface
+import android.graphics.pdf.PdfRenderer
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaPlayer
@@ -23,6 +24,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.Settings
 import android.speech.RecognizerIntent
@@ -249,7 +251,7 @@ class MainActivity : Activity() {
         permView = null
         root.removeAllViews()
         stack.clear()
-        val p = FrameLayout(this)
+        val p = NotifyFrame(this)
         pages = p
         val o = FrameLayout(this).apply { elevation = dp(40f) }
         overlay = o
@@ -259,6 +261,7 @@ class MainActivity : Activity() {
         })
         root.addView(p, MATCH, MATCH)
         buildBar()
+        p.onChange = { glassView?.invalidate() }
         root.addView(o, MATCH, MATCH)
         showTab(2, false)
         purgeTrash()
@@ -292,7 +295,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(dpi(6), dpi(6), dpi(6), dpi(6))
-            background = GlassDrawable(corner, 0x8CFFFFFF.toInt(), 0x5EFFFFFF)
+            background = GlassDrawable(corner, 0x47FFFFFF, 0x24FFFFFF)
         }
         val names = arrayOf("Recents", "Shared", "Browse")
         for (i in 0..2) {
@@ -335,19 +338,8 @@ class MainActivity : Activity() {
     }
 
     // ---------- liquid glass helpers ----------
-    /** Gambar ulang kaca belakang bar selama ada gerakan (scroll, transisi). */
-    fun kickGlass(ms: Long = 1200) {
-        glassUntil = maxOf(glassUntil, SystemClock.uptimeMillis() + ms)
-        if (glassRunning) return
-        glassRunning = true
-        Choreographer.getInstance().postFrameCallback(object : Choreographer.FrameCallback {
-            override fun doFrame(t: Long) {
-                glassView?.invalidate()
-                if (SystemClock.uptimeMillis() < glassUntil) Choreographer.getInstance().postFrameCallback(this)
-                else glassRunning = false
-            }
-        })
-    }
+    /** Kaca diperbarui langsung oleh NotifyFrame; ini hanya pemicu manual tambahan. */
+    fun kickGlass(ms: Long = 0) { glassView?.invalidate() }
 
     fun pressFx(v: View) {
         v.setOnTouchListener { view, e ->
@@ -384,7 +376,7 @@ class MainActivity : Activity() {
         curBlur = r
         val eff = if (r < 0.5f) null else RenderEffect.createBlurEffect(r, r, Shader.TileMode.CLAMP)
         pages?.setRenderEffect(eff)
-        barHolder?.setRenderEffect(eff)
+        barHolder?.alpha = 1f - (r / 28f).coerceIn(0f, 1f)
     }
 
     // ---------- page stack ----------
@@ -1057,7 +1049,7 @@ class MainActivity : Activity() {
         items.add(Mi(sep = true))
         items.add(Mi("Info", P.INFO) { info(f) })
         if (f.isDirectory) items.add(Mi("Open", P.FOLDER) { pushPage(ListPage(f, 0, f.name, true).view) })
-        else items.add(Mi("Quick Look", P.EYE) { openFile(f) })
+        else items.add(Mi("Quick Look", P.EYE) { quickLook(f) })
         items.add(Mi("Tags", P.TAG) { tagMenu(f, x, y) })
         items.add(Mi("Rename", P.PENCIL) { rename(f) })
         items.add(Mi(sep = true))
@@ -1374,9 +1366,9 @@ class MainActivity : Activity() {
             e in FileOps.IMG || e in FileOps.VID || e in FileOps.AUD || e in FileOps.TXT ->
                 if (open) openFile(d) else toast("Downloaded")
             e == "zip" -> actionSheet("Choose Action", "Choose desired action to perform with this.",
-                listOf(Btn("Extract") { extract(d) }, Btn("Share File") { share(d) }, trash))
+                listOf(Btn("Open") { openInApp(d) }, Btn("Extract") { extract(d) }, Btn("Share File") { share(d) }, trash))
             else -> actionSheet("Choose Action", "Choose desired action to perform with this.",
-                listOf(Btn("Open") { openWith(d) }, Btn("Share File") { share(d) }, trash))
+                listOf(Btn("Open") { openInApp(d) }, Btn("Open in…") { openWith(d) }, Btn("Share File") { share(d) }, trash))
         }
     }
 
@@ -1497,6 +1489,186 @@ class MainActivity : Activity() {
             val txt = try { sigInfo(d.path) } catch (e: Throwable) { "Cannot read signature." }
             ui.post { alert("Signature", txt, null, 0, listOf(Btn("OK", 1))) }
         }.start()
+    }
+
+    // ---------- buka file di dalam app ----------
+    fun quickLook(f: File) {
+        addRecent(f)
+        val e = FileOps.ext(f)
+        when {
+            e in FileOps.IMG -> viewerImage(f)
+            e in FileOps.VID -> viewerVideo(f)
+            e in FileOps.AUD -> viewerAudio(f)
+            e in FileOps.TXT -> viewerText(f)
+            else -> openInApp(f)
+        }
+    }
+
+    fun openInApp(f: File) {
+        val e = FileOps.ext(f)
+        when {
+            e in FileOps.IMG || e in FileOps.VID || e in FileOps.AUD || e in FileOps.TXT -> quickLook(f)
+            e == "pdf" -> viewerPdf(f)
+            e == "zip" || e == "jar" || e == "apk" || e == "apks" || e == "xapk" || e == "apkm" || e == "docx" || e == "xlsx" || e == "pptx" -> viewerArchive(f)
+            e == "ttf" || e == "otf" -> viewerFont(f)
+            else -> viewerGeneric(f)
+        }
+    }
+
+    fun viewerFont(f: File) {
+        showViewer(f.name, false, shareBtn(f, false)) { v ->
+            val sv = ScrollView(this).apply {
+                clipToPadding = false
+                setPadding(dpi(20), topInset + dpi(72), dpi(20), botInset + dpi(24))
+            }
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            val tf = try { Typeface.createFromFile(f) } catch (e: Exception) { null }
+            if (tf == null) col.addView(tv("This font can't be previewed.", 16f, C.GRAY))
+            else {
+                col.addView(tv(f.nameWithoutExtension, 24f, Color.BLACK).apply { typeface = tf })
+                for (s in floatArrayOf(40f, 30f, 22f, 17f, 13f)) {
+                    col.addView(tv("ABCDEFGHIJKLM\nNOPQRSTUVWXYZ\nabcdefghijklm\nnopqrstuvwxyz\n0123456789 !?&@#", s, Color.BLACK).apply {
+                        typeface = tf
+                        setPadding(0, dpi(16), 0, 0)
+                    })
+                }
+            }
+            sv.addView(col)
+            v.addView(sv, MATCH, MATCH)
+        }
+    }
+
+    fun viewerArchive(f: File) {
+        val extractBtn = tv("Extract", 17f, C.BLUE, true).apply { gravity = Gravity.CENTER }
+        showViewer(f.name, false, extractBtn) { v ->
+            extractBtn.setOnClickListener { closeViewer(); ui.postDelayed({ extract(f) }, 300) }
+            val lv = ListView(this).apply {
+                divider = null
+                clipToPadding = false
+                setPadding(0, topInset + dpi(64), 0, botInset + dpi(16))
+            }
+            v.addView(lv, MATCH, MATCH)
+            Thread {
+                val rows = ArrayList<Pair<String, String>>()
+                try {
+                    java.util.zip.ZipFile(f).use { z ->
+                        val en = z.entries()
+                        while (en.hasMoreElements() && rows.size < 3000) {
+                            val x = en.nextElement()
+                            rows.add(Pair(x.name, if (x.isDirectory) "Folder" else FileOps.size(x.size)))
+                        }
+                    }
+                } catch (x: Exception) {
+                    rows.add(Pair("This archive can't be listed (only ZIP-based files).", ""))
+                }
+                ui.post {
+                    lv.adapter = object : BaseAdapter() {
+                        override fun getCount() = rows.size
+                        override fun getItem(p: Int): Any = rows[p]
+                        override fun getItemId(p: Int) = p.toLong()
+                        override fun getView(p: Int, cv: View?, parent: ViewGroup?): View {
+                            val row = (cv as? LinearLayout) ?: LinearLayout(this@MainActivity).apply {
+                                gravity = Gravity.CENTER_VERTICAL
+                                setPadding(dpi(16), dpi(10), dpi(16), dpi(10))
+                                addView(tv("", 15f, Color.BLACK).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.MIDDLE }, llp(0, WRAP, 1f))
+                                addView(tv("", 13f, C.GRAY))
+                            }
+                            (row.getChildAt(0) as TextView).text = rows[p].first
+                            (row.getChildAt(1) as TextView).text = rows[p].second
+                            return row
+                        }
+                    }
+                }
+            }.start()
+        }
+    }
+
+    fun viewerPdf(f: File) {
+        showViewer(f.name, true, shareBtn(f, true)) { v ->
+            val sv = ScrollView(this).apply {
+                clipToPadding = false
+                setPadding(0, topInset + dpi(64), 0, botInset + dpi(16))
+            }
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            sv.addView(col)
+            v.addView(sv, MATCH, MATCH)
+            var closed = false
+            viewerCleanup = { closed = true }
+            Thread {
+                try {
+                    val pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+                    val r = PdfRenderer(pfd)
+                    val wpx = resources.displayMetrics.widthPixels
+                    for (i in 0 until minOf(r.pageCount, 40)) {
+                        if (closed) break
+                        val page = r.openPage(i)
+                        val bh = (wpx.toFloat() * page.height / page.width).toInt()
+                        val bmp = Bitmap.createBitmap(wpx, bh, Bitmap.Config.ARGB_8888)
+                        bmp.eraseColor(Color.WHITE)
+                        page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        page.close()
+                        ui.post {
+                            if (!closed) col.addView(ImageView(this).apply {
+                                setImageBitmap(bmp)
+                                adjustViewBounds = true
+                            }, llp(MATCH, WRAP).apply { bottomMargin = dpi(8) })
+                        }
+                    }
+                    r.close()
+                    pfd.close()
+                } catch (e: Throwable) {
+                    ui.post { toast("Cannot open this PDF") }
+                }
+            }.start()
+        }
+    }
+
+    /** File apa pun: teks kalau terbaca sebagai teks, selain itu tampilan hex. */
+    fun viewerGeneric(f: File) {
+        Thread {
+            val head = ByteArray(4096)
+            var n = 0
+            try { f.inputStream().use { n = it.read(head).coerceAtLeast(0) } } catch (e: Exception) {}
+            var bad = 0
+            for (i in 0 until n) {
+                val b = head[i].toInt() and 0xFF
+                if (b == 0 || b < 9 || b in 14..31) bad++
+            }
+            val text = n > 0 && bad * 100 / n < 2
+            ui.post {
+                if (text && f.length() <= 2_000_000) viewerText(f) else viewerHex(f, head, n)
+            }
+        }.start()
+    }
+
+    fun viewerHex(f: File, head: ByteArray, n: Int) {
+        showViewer(f.name, false, shareBtn(f, false)) { v ->
+            val sv = ScrollView(this).apply {
+                clipToPadding = false
+                setPadding(dpi(16), topInset + dpi(72), dpi(16), botInset + dpi(24))
+            }
+            val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            col.addView(tv(FileOps.kind(f) + " - " + FileOps.size(f.length()), 15f, C.GRAY).apply { setPadding(0, 0, 0, dpi(12)) })
+            val sb = StringBuilder()
+            var off = 0
+            while (off < n) {
+                sb.append(String.format("%06X  ", off))
+                val asc = StringBuilder()
+                for (i in 0 until 8) {
+                    if (off + i < n) {
+                        val b = head[off + i].toInt() and 0xFF
+                        sb.append(String.format("%02X ", b))
+                        asc.append(if (b in 32..126) b.toChar() else '.')
+                    } else sb.append("   ")
+                }
+                sb.append(" ").append(asc).append("\n")
+                off += 8
+            }
+            col.addView(tv(if (n == 0) "Empty file" else sb.toString(), 12f, Color.BLACK).apply { typeface = Typeface.MONOSPACE })
+            if (f.length() > n) col.addView(tv("Showing the first $n bytes.", 13f, C.GRAY).apply { setPadding(0, dpi(12), 0, 0) })
+            sv.addView(col)
+            v.addView(sv, MATCH, MATCH)
+        }
     }
 
     // ---------- recents / trash ----------
