@@ -32,7 +32,16 @@ const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
 object C {
     val BLUE = 0xFF007AFF.toInt()
-    val BG = 0xFFF2F2F7.toInt()
+    var dark = false
+    val BG: Int get() = if (dark) 0xFF000000.toInt() else 0xFFF2F2F7.toInt()
+    val TEXT: Int get() = if (dark) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
+    val CARD: Int get() = if (dark) 0xFF1C1C1E.toInt() else 0xFFFFFFFF.toInt()
+    val SEP: Int get() = if (dark) 0x33FFFFFF else 0x1F000000
+    val SEP2: Int get() = if (dark) 0x26FFFFFF else 0x1F000000
+    val PRESS: Int get() = if (dark) 0x33FFFFFF else 0x1F000000
+    val SHEET: Int get() = if (dark) 0xF22C2C2E.toInt() else 0xF2F2F2F2.toInt()
+    val HEAD: Int get() = if (dark) 0xF21C1C1E.toInt() else 0xF2F9F9F9.toInt()
+    val CHIP: Int get() = if (dark) 0xFF3A3A3C.toInt() else 0xFFE3E3E8.toInt()
     val GRAY = 0xFF8E8E93.toInt()
     val RED = 0xFFFF3B30.toInt()
     val tagColors = intArrayOf(
@@ -51,7 +60,7 @@ fun Context.dpi(v: Int) = (v * resources.displayMetrics.density).toInt()
 fun rr(col: Int, r: Float) = GradientDrawable().apply { setColor(col); cornerRadius = r }
 fun oval(col: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(col) }
 fun pressBg(): Drawable = StateListDrawable().apply {
-    addState(intArrayOf(android.R.attr.state_pressed), ColorDrawable(0x1F000000))
+    addState(intArrayOf(android.R.attr.state_pressed), ColorDrawable(C.PRESS))
     addState(intArrayOf(), ColorDrawable(0))
 }
 
@@ -104,6 +113,9 @@ object P {
     const val APPA = "M12,4l-6,14 M12,4l6,14 M8,13.5h8"
     const val CLOSE = "M6,6L18,18 M18,6L6,18"
     const val OPENIN = "M14,4h6v6 M20,4l-9,9 M18,14v4a2,2 0 0,1 -2,2h-9a2,2 0 0,1 -2,-2v-9a2,2 0 0,1 2,-2h4"
+    const val DOCS = "M8,7h8l3,3v10h-11z M16,7v3h3 M5,16V4h8"
+    const val SYNC = "M12,3a9,9 0 1,0 0,18a9,9 0 1,0 0,-18 M12,7v5l3,2"
+    const val GEAR = "M12,9a3,3 0 1,0 0.01,0 M12,3v3 M12,18v3 M3,12h3 M18,12h3 M5.6,5.6l2.1,2.1 M16.3,16.3l2.1,2.1 M5.6,18.4l2.1,-2.1 M16.3,7.7l2.1,-2.1"
     const val NOTE = "M9,18V5l12,-2v13 M9,18a3,3 0 1,1 -6,0a3,3 0 0,1 6,0 M21,16a3,3 0 1,1 -6,0a3,3 0 0,1 6,0"
 }
 
@@ -204,13 +216,20 @@ class GlassDrawable(
 
     private fun rad(): Float = minOf(corner, minOf(bounds.width(), bounds.height()) / 2f)
 
+    /** Mode gelap: isi tebal jadi abu gelap, isi tipis jadi putih tembus yang lebih redup. */
+    private fun adapt(c: Int): Int {
+        if (!C.dark || dark) return c
+        val a = c ushr 24
+        return if (a > 0xC0) (a shl 24) or 0x2C2C2E else ((a * 0.22f).toInt() shl 24) or 0xFFFFFF
+    }
+
     override fun draw(c: Canvas) {
         val b = bounds
         if (b.isEmpty) return
         val rd = rad()
         r.set(b)
         p.style = Paint.Style.FILL
-        p.shader = LinearGradient(0f, r.top, 0f, r.bottom, top, bottom, Shader.TileMode.CLAMP)
+        p.shader = LinearGradient(0f, r.top, 0f, r.bottom, adapt(top), adapt(bottom), Shader.TileMode.CLAMP)
         c.drawRoundRect(r, rd, rd, p)
         p.shader = LinearGradient(
             0f, r.top, 0f, r.top + r.height() * 0.5f,
@@ -286,7 +305,7 @@ class GlassBackdropView(
     ctx: Context,
     private val source: View,
     private val corner: Float,
-    private val params: LiquidParams = LiquidParams()
+    val params: LiquidParams = LiquidParams()
 ) : View(ctx) {
     private val loc = IntArray(2)
     private val sloc = IntArray(2)
@@ -398,7 +417,7 @@ class GlassBackdropView(
     }
 
     override fun onDraw(c: Canvas) {
-        if (Build.VERSION.SDK_INT < 31) { c.drawColor(0xE6F2F2F7.toInt()); return }
+        if (Build.VERSION.SDK_INT < 31) { c.drawColor((C.BG and 0x00FFFFFF) or 0xE6000000.toInt()); return }
         getLocationInWindow(loc)
         source.getLocationInWindow(sloc)
         c.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), sat)
@@ -479,6 +498,7 @@ object Thumbs {
 class FileThumbView(ctx: Context) : View(ctx) {
     var file: File? = null
     var bmp: Bitmap? = null
+    var selState = 0   // 0 = tidak memilih, 1 = belum dipilih, 2 = dipilih
     private val folder = FolderDrawable()
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = Typeface.DEFAULT_BOLD }
@@ -501,6 +521,30 @@ class FileThumbView(ctx: Context) : View(ctx) {
         val dw = bm.width * s
         val dh = bm.height * s
         return RectF(w / 2 - dw / 2, h / 2 - dh / 2, w / 2 + dw / 2, h / 2 + dh / 2)
+    }
+
+    override fun draw(canvas: Canvas) {
+        super.draw(canvas)
+        if (selState == 0) return
+        val d = resources.displayMetrics.density
+        val r = 11f * d
+        val cx = width - r - 3 * d
+        val cy = height - r - 3 * d
+        val pp = Paint(Paint.ANTI_ALIAS_FLAG)
+        if (selState == 2) {
+            pp.color = C.BLUE
+            canvas.drawCircle(cx, cy, r, pp)
+            val ck = Glyph.get(P.CHECK, Color.WHITE, true, 2.6f)
+            ck.setBounds((cx - r * 0.62f).toInt(), (cy - r * 0.62f).toInt(), (cx + r * 0.62f).toInt(), (cy + r * 0.62f).toInt())
+            ck.draw(canvas)
+        } else {
+            pp.color = 0xCCFFFFFF.toInt()
+            canvas.drawCircle(cx, cy, r, pp)
+            pp.style = Paint.Style.STROKE
+            pp.strokeWidth = 1.6f * d
+            pp.color = 0xFF8E8E93.toInt()
+            canvas.drawCircle(cx, cy, r - d, pp)
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -795,4 +839,63 @@ class ShareIconDrawable(private val kind: Int) : Drawable() {
     override fun setColorFilter(f: ColorFilter?) {}
     @Suppress("OVERRIDE_DEPRECATION")
     override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/** Saklar ala iOS (hijau saat aktif) dengan animasi geser. */
+class IosSwitch(ctx: Context) : View(ctx) {
+    var checked = false
+        private set
+    var onToggle: ((Boolean) -> Unit)? = null
+    private var pos = 0f
+    private var anim: ValueAnimator? = null
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val d = ctx.resources.displayMetrics.density
+
+    init {
+        setOnClickListener {
+            val nv = !checked
+            put(nv, true)
+            onToggle?.invoke(nv)
+        }
+    }
+
+    fun put(v: Boolean, animate: Boolean) {
+        checked = v
+        val t = if (v) 1f else 0f
+        anim?.cancel()
+        if (!animate) { pos = t; invalidate(); return }
+        val s = pos
+        anim = ValueAnimator.ofFloat(s, t).apply {
+            duration = 220
+            interpolator = IOS_EASE
+            addUpdateListener { pos = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+
+    override fun onMeasure(w: Int, h: Int) {
+        setMeasuredDimension((51 * d).toInt(), (31 * d).toInt())
+    }
+
+    private fun lerp(a: Int, b: Int, t: Float): Int {
+        val ar = a ushr 24; val rr = (a shr 16) and 255; val gg = (a shr 8) and 255; val bb = a and 255
+        val br = b ushr 24; val r2 = (b shr 16) and 255; val g2 = (b shr 8) and 255; val b2 = b and 255
+        return ((ar + (br - ar) * t).toInt() shl 24) or ((rr + (r2 - rr) * t).toInt() shl 16) or
+            ((gg + (g2 - gg) * t).toInt() shl 8) or (bb + (b2 - bb) * t).toInt()
+    }
+
+    override fun onDraw(c: Canvas) {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val off = if (C.dark) 0xFF39393D.toInt() else 0xFFE9E9EA.toInt()
+        p.style = Paint.Style.FILL
+        p.color = lerp(off, 0xFF34C759.toInt(), pos)
+        c.drawRoundRect(RectF(0f, 0f, w, h), h / 2, h / 2, p)
+        val kr = h / 2 - 2 * d
+        val cx = 2 * d + kr + pos * (w - 4 * d - 2 * kr)
+        p.color = 0x22000000
+        c.drawCircle(cx, h / 2 + d, kr, p)
+        p.color = Color.WHITE
+        c.drawCircle(cx, h / 2, kr, p)
+    }
 }

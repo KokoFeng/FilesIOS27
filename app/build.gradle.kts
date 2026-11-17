@@ -9,10 +9,24 @@ android {
         applicationId = "com.feng.filesios27"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1.0"
     }
-    buildTypes { release { isMinifyEnabled = false } }
+    signingConfigs {
+        create("feng") {
+            storeFile = file("feng-files.jks")
+            storePassword = "fengfiles27"
+            keyAlias = "feng"
+            keyPassword = "fengfiles27"
+        }
+    }
+    buildTypes {
+        debug { signingConfig = signingConfigs.getByName("feng") }
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("feng")
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

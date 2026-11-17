@@ -114,6 +114,16 @@ class MainActivity : Activity() {
     val prefs by lazy { getSharedPreferences("files", MODE_PRIVATE) }
     val df = SimpleDateFormat("M/d/yy", Locale.getDefault())
     val recentTs = HashMap<String, Long>()
+    var locked = false
+    var selPage: ListPage? = null
+    var selBarView: View? = null
+    val guardTick: Runnable = object : Runnable {
+        override fun run() {
+            if (locked) return
+            val r = Guard.check(this@MainActivity)
+            if (r != null) tamperLock(r) else ui.postDelayed(this, 15000)
+        }
+    }
     var glassView: GlassBackdropView? = null
     var barHolder: View? = null
     var glassUntil = 0L
@@ -136,13 +146,13 @@ class MainActivity : Activity() {
         if (bold) typeface = Typeface.DEFAULT_BOLD
     }
 
-    fun hairline(v: Boolean = false): View = View(this).apply { setBackgroundColor(0x1F000000) }
+    fun hairline(v: Boolean = false): View = View(this).apply { setBackgroundColor(C.SEP) }
 
     fun circle(path: String, dark: Boolean, onClick: (View) -> Unit): FrameLayout = FrameLayout(this).apply {
         background = if (dark) GlassDrawable(dp(20f), 0x66707070, 0x44505050, true) else GlassDrawable(dp(20f), 0xD9FFFFFF.toInt(), 0xA6FFFFFF.toInt())
         pressFx(this)
         elevation = if (dark) 0f else dp(2f)
-        addView(icon(path, if (dark) Color.WHITE else Color.BLACK, 20), flp(dpi(20), dpi(20), Gravity.CENTER))
+        addView(icon(path, if (dark) Color.WHITE else C.TEXT, 20), flp(dpi(20), dpi(20), Gravity.CENTER))
         setOnClickListener { onClick(it) }
     }
 
@@ -168,9 +178,10 @@ class MainActivity : Activity() {
         Thumbs.onLoaded = { kickGlass(250) }
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
-        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        C.dark = resolveDark()
+        gridMode = prefs.getBoolean("grid", true)
+        sortMode = prefs.getInt("sort", 0)
+        applyThemeFlags()
         root = FrameLayout(this).apply { setBackgroundColor(C.BG) }
         setContentView(root)
         root.setOnApplyWindowInsetsListener { _, i ->
@@ -192,12 +203,22 @@ class MainActivity : Activity() {
         }
     }
 
-    fun start() { if (hasAccess()) buildMain() else showPermission() }
+    fun start() {
+        val r = Guard.check(this)
+        if (r != null) { tamperLock(r); return }
+        if (hasAccess()) buildMain() else showPermission()
+        ui.postDelayed(guardTick, 15000)
+    }
 
     override fun onResume() {
         super.onResume()
-        if (!started) return
+        if (!started || locked) return
         if (permView != null && hasAccess()) buildMain() else reloadAll()
+    }
+
+    override fun onConfigurationChanged(c: android.content.res.Configuration) {
+        super.onConfigurationChanged(c)
+        if (started && !locked && prefs.getInt("theme", 0) == 0 && resolveDark() != C.dark) applyTheme(false)
     }
 
     override fun onRequestPermissionsResult(rc: Int, p: Array<out String>, r: IntArray) {
@@ -214,6 +235,7 @@ class MainActivity : Activity() {
     }
 
     override fun onBackPressed() {
+        if (locked) return
         val o = overlay
         if (o != null) for (i in o.childCount - 1 downTo 0) {
             val t = o.getChildAt(i).tag
@@ -230,7 +252,7 @@ class MainActivity : Activity() {
             setPadding(dpi(32), topInset, dpi(32), botInset)
         }
         v.addView(View(this).apply { background = FolderDrawable() }, llp(dpi(96), dpi(78)))
-        v.addView(tv("Allow Access to Files", 22f, Color.BLACK, true).apply { gravity = Gravity.CENTER; setPadding(0, dpi(24), 0, dpi(8)) })
+        v.addView(tv("Allow Access to Files", 22f, C.TEXT, true).apply { gravity = Gravity.CENTER; setPadding(0, dpi(24), 0, dpi(8)) })
         v.addView(tv("Files needs access to your storage to browse, open and manage your files.", 15f, C.GRAY).apply { gravity = Gravity.CENTER })
         v.addView(tv("Allow Access", 17f, Color.WHITE, true).apply {
             gravity = Gravity.CENTER
@@ -264,7 +286,7 @@ class MainActivity : Activity() {
         })
         root.addView(p, MATCH, MATCH)
         buildBar()
-        p.onChange = { glassView?.invalidate() }
+        p.onChange = { kickGlass(250) }
         root.addView(o, MATCH, MATCH)
         showTab(2, false)
         purgeTrash()
@@ -291,14 +313,19 @@ class MainActivity : Activity() {
                 }
             }
         }
-        val glass = GlassBackdropView(this, pages!!, corner)
-        glassView = glass
-        holder.addView(glass, flp(MATCH, MATCH))
+        val reduce = prefs.getBoolean("reduce", false)
+        if (!reduce) {
+            val glass = GlassBackdropView(this, pages!!, corner)
+            glassView = glass
+            holder.addView(glass, flp(MATCH, MATCH))
+            applyGlassStyle()
+        } else glassView = null
         val b = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(dpi(6), dpi(6), dpi(6), dpi(6))
-            background = GlassDrawable(corner, 0x14FFFFFF, 0x0AFFFFFF)
+            background = if (reduce) GlassDrawable(corner, 0xFFFFFFFF.toInt(), 0xFFF7F7F9.toInt())
+            else GlassDrawable(corner, 0x14FFFFFF, 0x0AFFFFFF)
         }
         val names = arrayOf("Recents", "Shared", "Browse")
         for (i in 0..2) {
@@ -309,10 +336,10 @@ class MainActivity : Activity() {
                 tag = i
             }
             cell.addView(ImageView(this).apply {
-                setImageDrawable(TabIcon(i, Color.BLACK))
+                setImageDrawable(TabIcon(i, C.TEXT))
                 layoutParams = ViewGroup.LayoutParams(dpi(24), dpi(24))
             })
-            cell.addView(tv(names[i], 10f, Color.BLACK, true).apply {
+            cell.addView(tv(names[i], 10f, C.TEXT, true).apply {
                 maxLines = 1
                 setSingleLine()
                 ellipsize = null
@@ -333,7 +360,7 @@ class MainActivity : Activity() {
         for (i in 0..2) {
             val cell = b.getChildAt(i) as LinearLayout
             val sel = i == tab
-            val col = if (sel) C.BLUE else Color.BLACK
+            val col = if (sel) C.BLUE else C.TEXT
             cell.background = if (sel) GlassDrawable(dp(28f), 0x24000000, 0x14000000) else null
             (cell.getChildAt(0) as ImageView).setImageDrawable(TabIcon(cell.tag as Int, col))
             (cell.getChildAt(1) as TextView).setTextColor(col)
@@ -342,7 +369,18 @@ class MainActivity : Activity() {
 
     // ---------- liquid glass helpers ----------
     /** Kaca diperbarui langsung oleh NotifyFrame; ini hanya pemicu manual tambahan. */
-    fun kickGlass(ms: Long = 0) { glassView?.invalidate() }
+    fun kickGlass(ms: Long = 600) {
+        glassUntil = maxOf(glassUntil, SystemClock.uptimeMillis() + ms)
+        if (glassRunning) return
+        glassRunning = true
+        Choreographer.getInstance().postFrameCallback(object : Choreographer.FrameCallback {
+            override fun doFrame(t: Long) {
+                glassView?.invalidate()
+                if (SystemClock.uptimeMillis() < glassUntil) Choreographer.getInstance().postFrameCallback(this)
+                else glassRunning = false
+            }
+        })
+    }
 
     fun pressFx(v: View) {
         v.setOnTouchListener { view, e ->
@@ -365,6 +403,7 @@ class MainActivity : Activity() {
             val c = o.getChildAt(i)
             if (c.tag is Runnable && c !== viewerView) need = true
         }
+        if (prefs.getBoolean("reduce", false)) need = false
         if (need == blurOn) return
         blurOn = need
         blurAnim?.cancel()
@@ -385,6 +424,7 @@ class MainActivity : Activity() {
     // ---------- page stack ----------
     fun showTab(i: Int, anim: Boolean) {
         tab = i
+        endSelect()
         kickGlass(600)
         val pg = pages ?: return
         val v: View = when (i) {
@@ -419,6 +459,7 @@ class MainActivity : Activity() {
 
     fun popPage() {
         if (stack.size < 2) return
+        endSelect()
         kickGlass(700)
         hideKb()
         val w = root.width.toFloat()
@@ -477,79 +518,6 @@ class MainActivity : Activity() {
         return super.dispatchTouchEvent(e)
     }
 
-    // ---------- Browse ----------
-    fun browsePage(): View {
-        val sv = ScrollView(this).apply { setBackgroundColor(C.BG); isVerticalScrollBarEnabled = false }
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dpi(16), topInset + dpi(16), dpi(16), botInset + dpi(110))
-        }
-        sv.addView(col)
-        col.addView(tv("Browse", 34f, Color.BLACK, true).apply { setPadding(dpi(4), dpi(24), 0, dpi(8)) })
-        val internal = Environment.getExternalStorageDirectory()
-        val sb = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            background = GlassDrawable(dp(19f), 0xB3FFFFFF.toInt(), 0x80FFFFFF.toInt()); elevation = dp(3f)
-            setPadding(dpi(8), 0, dpi(8), 0)
-            setOnClickListener { pushPage(ListPage(internal, 0, "On My iPhone", true, true).view) }
-        }
-        sb.addView(icon(P.SEARCH, C.GRAY, 18))
-        sb.addView(tv("Search", 17f, C.GRAY).apply { setPadding(dpi(8), 0, 0, 0) }, llp(0, WRAP, 1f))
-        sb.addView(icon(P.MIC, C.GRAY, 18))
-        col.addView(sb, llp(MATCH, dpi(38)).apply { bottomMargin = dpi(12) })
-
-        val favs = listOf(
-            Environment.DIRECTORY_DOWNLOADS, Environment.DIRECTORY_DOCUMENTS, Environment.DIRECTORY_DCIM,
-            Environment.DIRECTORY_PICTURES, Environment.DIRECTORY_MUSIC, Environment.DIRECTORY_MOVIES
-        ).map { Environment.getExternalStoragePublicDirectory(it) }.filter { it.exists() }
-        section(col, "Favorites", favs.map { Triple(it.name, P.FOLDER, it) })
-
-        val locs = ArrayList<Triple<String, String, File>>()
-        locs.add(Triple("iCloud Drive", P.CLOUD, icloudDir))
-        locs.add(Triple("On My iPhone", P.PHONE, internal))
-        try {
-            val dirs = getExternalFilesDirs(null)
-            for (i in 1 until dirs.size) {
-                val d = dirs[i] ?: continue
-                val p = d.absolutePath.substringBefore("/Android")
-                locs.add(Triple("SD Card", P.FOLDER, File(p)))
-            }
-        } catch (e: Exception) {}
-        locs.add(Triple("Recently Deleted", P.TRASH, trashDir))
-        section(col, "Locations", locs)
-        return sv
-    }
-
-    fun section(col: LinearLayout, title: String, rows: List<Triple<String, String, File>>) {
-        if (rows.isEmpty()) return
-        val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dpi(4), dpi(16), 0, dpi(8)) }
-        head.addView(tv(title, 22f, Color.BLACK, true))
-        val chev = icon(P.CHEV, C.BLUE, 18)
-        chev.rotation = 90f
-        head.addView(chev, llp(dpi(18), dpi(18)).apply { marginStart = dpi(8) })
-        val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = rr(Color.WHITE, dp(12f)); clipToOutline = true }
-        for ((i, r) in rows.withIndex()) {
-            val row = LinearLayout(this).apply {
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dpi(14), 0, dpi(14), 0)
-                background = pressBg()
-                setOnClickListener { pushPage(ListPage(r.third, if (r.third.path == trashDir.path) 3 else 0, r.first, true).view) }
-            }
-            row.addView(icon(r.second, C.BLUE, 24))
-            row.addView(tv(r.first, 17f, Color.BLACK).apply { setPadding(dpi(14), 0, 0, 0) }, llp(0, WRAP, 1f))
-            row.addView(icon(P.CHEV, 0xFFC7C7CC.toInt(), 16))
-            if (i > 0) card.addView(hairline(), llp(MATCH, 1).apply { marginStart = dpi(52) })
-            card.addView(row, llp(MATCH, dpi(52)))
-        }
-        head.setOnClickListener {
-            val open = card.visibility == View.VISIBLE
-            card.visibility = if (open) View.GONE else View.VISIBLE
-            chev.animate().rotation(if (open) 0f else 90f).setDuration(220).setInterpolator(IOS_EASE).start()
-        }
-        col.addView(head)
-        col.addView(card)
-    }
-
     // ---------- list page ----------
     fun sortFiles(l: List<File>): List<File> {
         val cmp: Comparator<File> = when (sortMode) {
@@ -564,7 +532,7 @@ class MainActivity : Activity() {
     fun makeCell(g: Boolean): LinearLayout {
         val c = LinearLayout(this).apply { background = pressBg() }
         val thumb = FileThumbView(this)
-        val name = tv("", if (g) 14f else 16f, Color.BLACK)
+        val name = tv("", if (g) 14f else 16f, C.TEXT)
         val sub = tv("", if (g) 12f else 13f, C.GRAY)
         val dot = View(this)
         name.maxLines = 2
@@ -631,8 +599,9 @@ class MainActivity : Activity() {
         return df.format(Date(f.lastModified())) + sep + FileOps.size(f.length())
     }
 
-    fun bindCell(c: View, f: File, g: Boolean, kind: Int) {
+    fun bindCell(c: View, f: File, g: Boolean, kind: Int, sel: Int = 0) {
         val h = c.tag as H
+        h.thumb.selState = sel
         h.thumb.bind(f)
         h.name.text = if (g) midCut(f.name, 28) else f.name
         val t = tagOf(f)
@@ -641,8 +610,14 @@ class MainActivity : Activity() {
         h.sub.text = subText(f, g, kind)
     }
 
-    inner class ListPage(val dir: File?, val kind: Int, val title: String, val back: Boolean, val focusSearch: Boolean = false) {
+    inner class ListPage(val dir: File?, val kind: Int, val title: String, val back: Boolean, val focusSearch: Boolean = false, val tagColor: Int = 0) {
         val view = LinearLayout(ctx)
+        var selecting = false
+        val selected = LinkedHashSet<File>()
+        var onSelChanged: (() -> Unit)? = null
+        lateinit var titleTv: TextView
+        lateinit var moreBtn: View
+        lateinit var doneBtn: View
         var items: List<File> = emptyList()
         var base: List<File> = emptyList()
         var query = ""
@@ -660,7 +635,7 @@ class MainActivity : Activity() {
             override fun getItemId(p: Int) = p.toLong()
             override fun getView(p: Int, cv: View?, parent: ViewGroup?): View {
                 val row = cv ?: makeCell(g)
-                bindCell(row, items[p], g, kind)
+                bindCell(row, items[p], g, kind, selState(items[p]))
                 return row
             }
         }
@@ -672,33 +647,56 @@ class MainActivity : Activity() {
             val head = FrameLayout(ctx).apply { setPadding(dpi(12), topInset + dpi(8), dpi(12), dpi(6)) }
             if (back) {
                 head.addView(circle(P.BACK, false) { popPage() }, flp(dpi(40), dpi(40), Gravity.START))
-                head.addView(tv(title, 17f, Color.BLACK, true).apply {
+                titleTv = tv(title, 17f, C.TEXT, true).apply {
                     maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; maxWidth = dpi(200)
-                }, flp(WRAP, dpi(40), Gravity.CENTER_HORIZONTAL))
+                }
+                head.addView(titleTv, flp(WRAP, dpi(40), Gravity.CENTER_HORIZONTAL))
             } else {
                 head.minimumHeight = topInset + dpi(64)
-                head.addView(tv(title, 34f, Color.BLACK, true).apply { setPadding(dpi(6), 0, 0, 0) }, flp(WRAP, WRAP, Gravity.START or Gravity.CENTER_VERTICAL))
+                titleTv = tv(title, 34f, C.TEXT, true).apply { setPadding(dpi(6), 0, 0, 0) }
+                head.addView(titleTv, flp(WRAP, WRAP, Gravity.START or Gravity.CENTER_VERTICAL))
             }
-            head.addView(circle(P.MORE, false) { v -> showMore(this@ListPage, v) }, flp(dpi(40), dpi(40), Gravity.END or (if (back) Gravity.NO_GRAVITY else Gravity.CENTER_VERTICAL)))
+            val mg = Gravity.END or (if (back) Gravity.NO_GRAVITY else Gravity.CENTER_VERTICAL)
+            moreBtn = circle(P.MORE, false) { v -> showMore(this@ListPage, v) }
+            head.addView(moreBtn, flp(dpi(40), dpi(40), mg))
+            doneBtn = tv("Done", 17f, C.BLUE, true).apply {
+                gravity = Gravity.CENTER
+                setPadding(dpi(12), 0, dpi(4), 0)
+                visibility = View.GONE
+                setOnClickListener { endSelect() }
+            }
+            head.addView(doneBtn, flp(WRAP, dpi(40), mg))
             view.addView(head, llp(MATCH, WRAP))
 
             val sb = LinearLayout(ctx).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 background = GlassDrawable(dp(19f), 0xB3FFFFFF.toInt(), 0x80FFFFFF.toInt()); elevation = dp(3f)
                 setPadding(dpi(8), 0, dpi(8), 0)
+                setOnClickListener { focusField() }
             }
             sb.addView(icon(P.SEARCH, C.GRAY, 18))
+            val clearBtn = icon(P.CLOSE, C.GRAY, 16)
+            clearBtn.visibility = View.GONE
+            clearBtn.setOnClickListener { search.setText("") }
+            val pending = Runnable { query = search.text.toString().trim(); applyQuery() }
             search.apply {
                 hint = "Search"
                 textSize = 17f
                 setSingleLine()
+                setTextColor(C.TEXT)
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                 imeOptions = EditorInfo.IME_ACTION_SEARCH
                 setHintTextColor(C.GRAY)
                 setPadding(dpi(8), 0, 0, 0)
-                setOnEditorActionListener { _, _, _ -> hideKb(); true }
-                onChange { query = text.toString(); applyQuery() }
+                setOnEditorActionListener { _, _, _ -> ui.removeCallbacks(pending); pending.run(); hideKb(); true }
+                onChange {
+                    clearBtn.visibility = if (text.isNullOrEmpty()) View.GONE else View.VISIBLE
+                    ui.removeCallbacks(pending)
+                    ui.postDelayed(pending, 200)
+                }
             }
             sb.addView(search, llp(0, MATCH, 1f))
+            sb.addView(clearBtn, llp(dpi(22), dpi(22)).apply { marginEnd = dpi(6) })
             sb.addView(icon(P.MIC, C.GRAY, 18).apply {
                 setOnClickListener {
                     activeSearch = search
@@ -720,7 +718,7 @@ class MainActivity : Activity() {
                 setPadding(0, 0, 0, botInset + dpi(110))
                 adapter = la
                 setOnItemClickListener { _, _, pos, _ -> onItem(items[pos]) }
-                setOnItemLongClickListener { _, v, pos, _ -> contextMenu(items[pos], v, kind); true }
+                setOnItemLongClickListener { _, v, pos, _ -> if (selecting) toggleSel(items[pos]) else { haptic(); contextMenu(items[pos], v, kind) }; true }
             }
             grid.apply {
                 numColumns = (root.width / dpi(115)).coerceAtLeast(3)
@@ -730,7 +728,7 @@ class MainActivity : Activity() {
                 setPadding(dpi(8), dpi(4), dpi(8), botInset + dpi(110))
                 adapter = ga
                 setOnItemClickListener { _, _, pos, _ -> onItem(items[pos]) }
-                setOnItemLongClickListener { _, v, pos, _ -> contextMenu(items[pos], v, kind); true }
+                setOnItemLongClickListener { _, v, pos, _ -> if (selecting) toggleSel(items[pos]) else { haptic(); contextMenu(items[pos], v, kind) }; true }
             }
             empty.gravity = Gravity.CENTER
             empty.visibility = View.GONE
@@ -740,10 +738,27 @@ class MainActivity : Activity() {
             view.addView(content, llp(MATCH, 0, 1f))
             applyMode()
             reload()
-            if (focusSearch) search.postDelayed({
-                search.requestFocus()
-                (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(search, 0)
-            }, 400)
+            if (focusSearch) search.postDelayed({ focusField() }, 450)
+        }
+
+        fun focusField() {
+            search.requestFocusFromTouch()
+            (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(search, InputMethodManager.SHOW_IMPLICIT)
+        }
+
+        fun selState(f: File): Int = if (!selecting) 0 else if (selected.contains(f)) 2 else 1
+
+        fun toggleSel(f: File) {
+            if (!selected.remove(f)) selected.add(f)
+            updateSelUi()
+            refresh()
+        }
+
+        fun updateSelUi() {
+            titleTv.text = if (selecting) (if (selected.isEmpty()) "Select Items" else "${selected.size} Selected") else title
+            moreBtn.visibility = if (selecting) View.GONE else View.VISIBLE
+            doneBtn.visibility = if (selecting) View.VISIBLE else View.GONE
+            onSelChanged?.invoke()
         }
 
         fun applyMode() {
@@ -753,6 +768,7 @@ class MainActivity : Activity() {
 
         fun onItem(f: File) {
             hideKb()
+            if (selecting) { toggleSel(f); return }
             if (kind == 3) {
                 alert("Recently Deleted", "\"${f.name}\" was deleted recently. Recover it to open it.", null, 0,
                     listOf(Btn("Cancel"), Btn("Recover", 1) { bg("Recovered") { recover(f) } }))
@@ -766,6 +782,7 @@ class MainActivity : Activity() {
                 val r: List<File> = try {
                     when (kind) {
                         0 -> FileOps.list(dir!!)
+                        4 -> prefs.all.entries.filter { it.key.startsWith("t:") && (it.value as? Int) == tagColor }.map { File(it.key.substring(2)) }.filter { it.exists() }
                         3 -> FileOps.list(dir!!).sortedByDescending { prefs.getLong("del:" + it.path, it.lastModified()) }
                         1 -> loadRecents()
                         else -> prefs.getString("shared", "")!!.split("\n").filter { it.isNotBlank() }.map { File(it) }.filter { it.exists() }
@@ -805,6 +822,10 @@ class MainActivity : Activity() {
         val loc = IntArray(2)
         v.getLocationOnScreen(loc)
         val items = ArrayList<Mi>()
+        if (pg.kind != 3) {
+            items.add(Mi("Select", P.CHECK) { beginSelect(pg) })
+            items.add(Mi(sep = true))
+        }
         if (pg.kind == 3) {
             items.add(Mi("Delete All", P.TRASH, destructive = true) { confirmPurge(pg.base) })
             items.add(Mi(sep = true))
@@ -824,13 +845,17 @@ class MainActivity : Activity() {
             if (clip != null) items.add(Mi("Paste", P.COPY) { paste(pg.dir!!) })
             items.add(Mi(sep = true))
         }
-        items.add(Mi("as Icons", P.GRID, check = gridMode) { gridMode = true; stack.forEach { (it.tag as? ListPage)?.refresh() } })
-        items.add(Mi("as List", P.LIST, check = !gridMode) { gridMode = false; stack.forEach { (it.tag as? ListPage)?.refresh() } })
+        items.add(Mi("as Icons", P.GRID, check = gridMode) { gridMode = true; prefs.edit().putBoolean("grid", true).apply(); stack.forEach { (it.tag as? ListPage)?.refresh() } })
+        items.add(Mi("as List", P.LIST, check = !gridMode) { gridMode = false; prefs.edit().putBoolean("grid", false).apply(); stack.forEach { (it.tag as? ListPage)?.refresh() } })
         if (pg.kind == 0) {
             items.add(Mi(sep = true))
             items.add(Mi("Sort By", header = true))
             val n = arrayOf("Name", "Kind", "Date", "Size")
-            for (i in 0..3) items.add(Mi(n[i], check = sortMode == i) { sortMode = i; stack.forEach { (it.tag as? ListPage)?.applyQuery() } })
+            for (i in 0..3) items.add(Mi(n[i], check = sortMode == i) { sortMode = i; prefs.edit().putInt("sort", i).apply(); stack.forEach { (it.tag as? ListPage)?.applyQuery() } })
+        }
+        if (pg.kind == 1 || pg.kind == 2) {
+            items.add(Mi(sep = true))
+            items.add(Mi("Settings", P.GEAR) { pushPage(settingsPage()) })
         }
         showMenu((loc[0] + v.width - dpi(250)).toFloat(), (loc[1] + v.height + dpi(6)).toFloat(), null, items)
     }
@@ -872,8 +897,8 @@ class MainActivity : Activity() {
                     background = pressBg()
                     setOnClickListener { dismiss { m.action() } }
                 }
-                cell.addView(icon(m.icon!!, Color.BLACK, 22))
-                cell.addView(tv(m.label, 11f, Color.BLACK).apply { setPadding(0, dpi(4), 0, 0) })
+                cell.addView(icon(m.icon!!, C.TEXT, 22))
+                cell.addView(tv(m.label, 11f, C.TEXT).apply { setPadding(0, dpi(4), 0, 0) })
                 r.addView(cell, llp(0, WRAP, 1f))
             }
             card.addView(r)
@@ -883,7 +908,7 @@ class MainActivity : Activity() {
         for (m in items) {
             when {
                 m.sep -> {
-                    card.addView(View(this).apply { setBackgroundColor(0x1F000000) }, llp(MATCH, dpi(8)))
+                    card.addView(View(this).apply { setBackgroundColor(C.SEP2) }, llp(MATCH, dpi(8)))
                     prevRow = false
                 }
                 m.header -> {
@@ -892,7 +917,7 @@ class MainActivity : Activity() {
                 }
                 else -> {
                     if (prevRow) card.addView(hairline(), llp(MATCH, 1))
-                    val col = if (m.destructive) C.RED else Color.BLACK
+                    val col = if (m.destructive) C.RED else C.TEXT
                     val row = LinearLayout(this).apply {
                         gravity = Gravity.CENTER_VERTICAL
                         setPadding(dpi(16), 0, dpi(16), 0)
@@ -902,7 +927,7 @@ class MainActivity : Activity() {
                     row.addView(tv(m.label, 17f, col), llp(0, WRAP, 1f))
                     when {
                         m.dot != 0 -> row.addView(View(this).apply { background = oval(m.dot) }, llp(dpi(16), dpi(16)))
-                        m.check -> row.addView(icon(P.CHECK, Color.BLACK, 18))
+                        m.check -> row.addView(icon(P.CHECK, C.TEXT, 18))
                         m.icon != null -> row.addView(icon(m.icon, col, 22))
                     }
                     card.addView(row, llp(MATCH, dpi(44)))
@@ -948,22 +973,22 @@ class MainActivity : Activity() {
         val dim = View(this).apply { setBackgroundColor(0x55000000); alpha = 0f; isClickable = true }
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = rr(0xF2F2F2F2.toInt(), dp(14f))
+            background = rr(C.SHEET, dp(14f))
             clipToOutline = true
             elevation = dp(16f)
         }
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dpi(16), dpi(18), dpi(16), dpi(16)) }
-        body.addView(tv(title, 17f, Color.BLACK, true).apply { gravity = Gravity.CENTER })
-        if (msg != null) body.addView(tv(msg, 13f, Color.BLACK).apply { gravity = Gravity.CENTER; setPadding(0, dpi(4), 0, 0) })
+        body.addView(tv(title, 17f, C.TEXT, true).apply { gravity = Gravity.CENTER })
+        if (msg != null) body.addView(tv(msg, 13f, C.TEXT).apply { gravity = Gravity.CENTER; setPadding(0, dpi(4), 0, 0) })
         var ed: IosEditText? = null
         if (initial != null) {
             val e = IosEditText(this).apply {
                 setText(initial)
                 setSingleLine()
                 textSize = 15f
-                setTextColor(Color.BLACK)
+                setTextColor(C.TEXT)
                 setPadding(dpi(8), dpi(7), dpi(8), dpi(7))
-                background = rr(Color.WHITE, dp(6f))
+                background = rr(C.CARD, dp(6f))
             }
             ed = e
             body.addView(e, llp(MATCH, WRAP).apply { topMargin = dpi(12) })
@@ -1139,8 +1164,8 @@ class MainActivity : Activity() {
         dim.tag = Runnable { close() }
         dim.setOnClickListener { close() }
 
-        val head = FrameLayout(this).apply { setBackgroundColor(0xF2F9F9F9.toInt()) }
-        head.addView(tv("Info", 17f, Color.BLACK, true), flp(WRAP, WRAP, Gravity.CENTER))
+        val head = FrameLayout(this).apply { setBackgroundColor(C.HEAD) }
+        head.addView(tv("Info", 17f, C.TEXT, true), flp(WRAP, WRAP, Gravity.CENTER))
         head.addView(tv("Done", 17f, C.BLUE, true).apply {
             setPadding(dpi(16), dpi(14), dpi(16), dpi(14))
             setOnClickListener { close() }
@@ -1155,7 +1180,7 @@ class MainActivity : Activity() {
         }
         sv.addView(col)
         col.addView(FileThumbView(this).also { it.bind(f) }, llp(MATCH, dpi(190)))
-        col.addView(tv(f.name, 22f, Color.BLACK, true).apply { setPadding(0, dpi(16), 0, dpi(2)) })
+        col.addView(tv(f.name, 22f, C.TEXT, true).apply { setPadding(0, dpi(16), 0, dpi(2)) })
         col.addView(tv(FileOps.kind(f) + " - " + FileOps.size(sz), 15f, C.GRAY))
         if (!f.isDirectory) col.addView(tv("OPEN", 15f, Color.WHITE, true).apply {
             gravity = Gravity.CENTER
@@ -1166,7 +1191,7 @@ class MainActivity : Activity() {
         col.addView(hairline(), llp(MATCH, 1).apply { topMargin = dpi(20) })
 
         val ih = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dpi(16), 0, dpi(8)) }
-        ih.addView(tv("Information", 20f, Color.BLACK, true), llp(0, WRAP, 1f))
+        ih.addView(tv("Information", 20f, C.TEXT, true), llp(0, WRAP, 1f))
         val more = tv("Show More", 15f, C.BLUE)
         ih.addView(more)
         col.addView(ih)
@@ -1174,7 +1199,7 @@ class MainActivity : Activity() {
         fun row(k: String, v: String, blue: Boolean = false): View {
             val r = LinearLayout(this).apply { setPadding(0, dpi(10), 0, dpi(10)) }
             r.addView(tv(k, 15f, C.GRAY), llp(dpi(90), WRAP))
-            r.addView(tv(v, 15f, if (blue) C.BLUE else Color.BLACK).apply { gravity = Gravity.END }, llp(0, WRAP, 1f))
+            r.addView(tv(v, 15f, if (blue) C.BLUE else C.TEXT).apply { gravity = Gravity.END }, llp(0, WRAP, 1f))
             val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             box.addView(hairline(), llp(MATCH, 1))
             box.addView(r)
@@ -1206,7 +1231,7 @@ class MainActivity : Activity() {
 
         col.addView(hairline(), llp(MATCH, 1).apply { topMargin = dpi(20) })
         val th = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dpi(16), 0, dpi(8)) }
-        th.addView(tv("Tags", 20f, Color.BLACK, true), llp(0, WRAP, 1f))
+        th.addView(tv("Tags", 20f, C.TEXT, true), llp(0, WRAP, 1f))
         val cur = tagOf(f)
         val idx = C.tagColors.indexOf(cur)
         th.addView(tv(if (idx >= 0) C.tagNames[idx] else "Add Tags", 15f, C.BLUE).apply {
@@ -1346,15 +1371,15 @@ class MainActivity : Activity() {
         val head = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dpi(18), dpi(14), dpi(16), dpi(14))
-            setBackgroundColor(0xF2F9F9F9.toInt())
+            setBackgroundColor(C.HEAD)
         }
         head.addView(FileThumbView(this).also { it.bind(f) }, llp(dpi(40), dpi(48)))
         val hc = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        hc.addView(tv(f.name, 17f, Color.BLACK, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.MIDDLE })
+        hc.addView(tv(f.name, 17f, C.TEXT, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.MIDDLE })
         hc.addView(tv(FileOps.kind(f) + " · " + sizeLocal(f.length()), 15f, C.GRAY))
         head.addView(hc, llp(0, WRAP, 1f).apply { marginStart = dpi(12); marginEnd = dpi(8) })
         head.addView(FrameLayout(this).apply {
-            background = oval(0xFFE3E3E8.toInt())
+            background = oval(C.CHIP)
             addView(icon(P.CLOSE, 0xFF6C6C70.toInt(), 16), flp(dpi(16), dpi(16), Gravity.CENTER))
             setOnClickListener { close {} }
         }, llp(dpi(34), dpi(34)))
@@ -1374,7 +1399,7 @@ class MainActivity : Activity() {
                 setOnClickListener { close { act() } }
             }
             cell.addView(iconView, llp(dpi(62), dpi(62)))
-            cell.addView(tv(label, 12f, Color.BLACK).apply { gravity = Gravity.CENTER; maxLines = 1; setPadding(0, dpi(6), 0, 0) })
+            cell.addView(tv(label, 12f, C.TEXT).apply { gravity = Gravity.CENTER; maxLines = 1; setPadding(0, dpi(6), 0, 0) })
             row.addView(cell, llp(dpi(76), WRAP))
         }
         fun shareIc(kind: Int) = ImageView(this).apply { setImageDrawable(ShareIconDrawable(kind)) }
@@ -1399,7 +1424,7 @@ class MainActivity : Activity() {
         fun card(items: List<Triple<String, String, () -> Unit>>) {
             val cd = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                background = rr(Color.WHITE, dp(14f))
+                background = rr(C.CARD, dp(14f))
                 clipToOutline = true
             }
             for ((i, item) in items.withIndex()) {
@@ -1410,8 +1435,8 @@ class MainActivity : Activity() {
                     background = pressBg()
                     setOnClickListener { close { item.third() } }
                 }
-                r.addView(tv(item.first, 17f, Color.BLACK), llp(0, WRAP, 1f))
-                r.addView(icon(item.second, Color.BLACK, 22))
+                r.addView(tv(item.first, 17f, C.TEXT), llp(0, WRAP, 1f))
+                r.addView(icon(item.second, C.TEXT, 22))
                 cd.addView(r, llp(MATCH, dpi(50)))
             }
             content.addView(cd, llp(MATCH, WRAP).apply { topMargin = dpi(20) })
@@ -1541,7 +1566,7 @@ class MainActivity : Activity() {
         }
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = rr(0xF2F2F2F2.toInt(), dp(14f))
+            background = rr(C.SHEET, dp(14f))
             clipToOutline = true
         }
         val head = LinearLayout(this).apply {
@@ -1576,7 +1601,7 @@ class MainActivity : Activity() {
         }
         val cc = tv(cancel, ts, accent, true).apply {
             gravity = Gravity.CENTER
-            background = rr(Color.WHITE, dp(14f))
+            background = rr(C.CARD, dp(14f))
             setOnClickListener { dismiss {} }
         }
         wrap.addView(card, llp(MATCH, WRAP))
@@ -1683,9 +1708,9 @@ class MainActivity : Activity() {
             val tf = try { Typeface.createFromFile(f) } catch (e: Exception) { null }
             if (tf == null) col.addView(tv("This font can't be previewed.", 16f, C.GRAY))
             else {
-                col.addView(tv(f.nameWithoutExtension, 24f, Color.BLACK).apply { typeface = tf })
+                col.addView(tv(f.nameWithoutExtension, 24f, C.TEXT).apply { typeface = tf })
                 for (s in floatArrayOf(40f, 30f, 22f, 17f, 13f)) {
-                    col.addView(tv("ABCDEFGHIJKLM\nNOPQRSTUVWXYZ\nabcdefghijklm\nnopqrstuvwxyz\n0123456789 !?&@#", s, Color.BLACK).apply {
+                    col.addView(tv("ABCDEFGHIJKLM\nNOPQRSTUVWXYZ\nabcdefghijklm\nnopqrstuvwxyz\n0123456789 !?&@#", s, C.TEXT).apply {
                         typeface = tf
                         setPadding(0, dpi(16), 0, 0)
                     })
@@ -1737,7 +1762,7 @@ class MainActivity : Activity() {
                             val row = (cv as? LinearLayout) ?: LinearLayout(this@MainActivity).apply {
                                 gravity = Gravity.CENTER_VERTICAL
                                 setPadding(dpi(16), dpi(10), dpi(16), dpi(10))
-                                addView(tv("", 15f, Color.BLACK).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.MIDDLE }, llp(0, WRAP, 1f))
+                                addView(tv("", 15f, C.TEXT).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.MIDDLE }, llp(0, WRAP, 1f))
                                 addView(tv("", 13f, C.GRAY))
                             }
                             (row.getChildAt(0) as TextView).text = rows[p].first
@@ -1849,7 +1874,7 @@ class MainActivity : Activity() {
                 sb.append(" ").append(asc).append("\n")
                 off += 8
             }
-            col.addView(tv(if (n == 0) "Empty file" else sb.toString(), 12f, Color.BLACK).apply { typeface = Typeface.MONOSPACE })
+            col.addView(tv(if (n == 0) "Empty file" else sb.toString(), 12f, C.TEXT).apply { typeface = Typeface.MONOSPACE })
             if (f.length() > n) col.addView(tv("Showing the first $n bytes.", 13f, C.GRAY).apply { setPadding(0, dpi(12), 0, 0) })
             sv.addView(col)
             v.addView(sv, MATCH, MATCH)
@@ -1925,34 +1950,6 @@ class MainActivity : Activity() {
     }
 
     // ---------- download / save ----------
-    fun guessName(url: String): String {
-        val p = try { Uri.parse(url).lastPathSegment } catch (e: Exception) { null }
-        val n = (p ?: "").substringBefore('?').trim()
-        return if (n.isBlank()) "download" else n
-    }
-
-    fun finalName(typed: String, orig: String): String {
-        val n = typed.trim().replace("/", "_")
-        val oe = orig.substringAfterLast('.', "")
-        return if (!n.contains('.') && oe.isNotEmpty() && oe.length <= 5) "$n.$oe" else n
-    }
-
-    fun askUrl(dir: File) {
-        alert("Download from URL", "Enter the link of the file", "https://", 8, listOf(Btn("Cancel"), Btn("Next", 1) { n ->
-            val u = n.trim()
-            if (u.startsWith("http://") || u.startsWith("https://")) askDownload(u, dir) else toast("Invalid link")
-        }))
-    }
-
-    fun askDownload(url: String, dir: File) {
-        val orig = guessName(url)
-        val sel = if (orig.contains('.')) orig.lastIndexOf('.') else orig.length
-        alert("Download", "Give this file a name before it downloads.", orig, sel, listOf(Btn("Cancel"), Btn("Done", 1) { n ->
-            if (n.isBlank()) { toast("A name is required"); askDownload(url, dir) }
-            else startDownload(url, dir, finalName(n, orig))
-        }))
-    }
-
     fun progressPill(m: String): TextView {
         val t = tv(m, 14f, Color.WHITE).apply {
             background = rr(0xE62C2C2E.toInt(), dp(20f))
@@ -1973,7 +1970,9 @@ class MainActivity : Activity() {
             c.connectTimeout = 15000
             c.readTimeout = 30000
             c.instanceFollowRedirects = false
-            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) Files/1.0")
+            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36")
+            c.setRequestProperty("Accept", "*/*")
+            c.setRequestProperty("Accept-Encoding", "identity")
             val code = c.responseCode
             if (code in 301..303 || code == 307 || code == 308) {
                 val loc = c.getHeaderField("Location") ?: throw Exception("Bad redirect")
@@ -1985,48 +1984,6 @@ class MainActivity : Activity() {
             if (code !in 200..299) throw Exception("HTTP $code")
             return c
         }
-    }
-
-    fun startDownload(url: String, dir: File, name: String) {
-        val pill = progressPill("Downloading…")
-        Thread {
-            val tmp = File(dir, ".$name.part")
-            try {
-                dir.mkdirs()
-                val dst = FileOps.unique(dir, name)
-                val c = openConn(url)
-                val total = c.contentLengthLong
-                var got = 0L
-                var last = 0L
-                c.inputStream.use { ins ->
-                    FileOutputStream(tmp).use { out ->
-                        val buf = ByteArray(65536)
-                        while (true) {
-                            val r = ins.read(buf)
-                            if (r < 0) break
-                            out.write(buf, 0, r)
-                            got += r
-                            val now = System.currentTimeMillis()
-                            if (now - last > 300) {
-                                last = now
-                                val txt = if (total > 0) "Downloading ${got * 100 / total}%" else "Downloading ${FileOps.size(got)}"
-                                ui.post { pill.text = txt }
-                            }
-                        }
-                    }
-                }
-                if (!tmp.renameTo(dst)) throw Exception("Cannot save file")
-                ui.post { removePill(pill); finishSave(dst) }
-            } catch (e: Throwable) {
-                tmp.delete()
-                ui.post { removePill(pill); toast("Download failed: " + (e.message ?: "error")) }
-            }
-        }.start()
-    }
-
-    fun finishSave(dst: File) {
-        reloadAll()
-        followUp(dst, false)
     }
 
     fun consumeShare() {
@@ -2078,14 +2035,14 @@ class MainActivity : Activity() {
         val o = overlay ?: return
         if (viewerView != null) return
         hideKb()
-        val v = FrameLayout(this).apply { setBackgroundColor(if (dark) Color.BLACK else Color.WHITE); isClickable = true }
+        val v = FrameLayout(this).apply { setBackgroundColor(if (dark) C.TEXT else C.BG); isClickable = true }
         build(v)
         val bar = FrameLayout(this).apply {
             setPadding(dpi(12), topInset + dpi(8), dpi(12), dpi(8))
-            setBackgroundColor(if (dark) 0x66000000 else 0xF0FFFFFF.toInt())
+            setBackgroundColor(if (dark) 0x66000000 else C.HEAD)
         }
         bar.addView(circle(P.BACK, dark) { closeViewer() }, flp(dpi(40), dpi(40), Gravity.START))
-        bar.addView(tv(title, 17f, if (dark) Color.WHITE else Color.BLACK, true).apply {
+        bar.addView(tv(title, 17f, if (dark) Color.WHITE else C.TEXT, true).apply {
             maxLines = 1; ellipsize = TextUtils.TruncateAt.MIDDLE; maxWidth = dpi(200); gravity = Gravity.CENTER
         }, flp(WRAP, dpi(40), Gravity.CENTER_HORIZONTAL))
         if (right != null) bar.addView(right, flp(if (right is TextView) WRAP else dpi(40), dpi(40), Gravity.END))
@@ -2256,7 +2213,7 @@ class MainActivity : Activity() {
                 textSize = 15f
                 typeface = Typeface.MONOSPACE
                 gravity = Gravity.TOP
-                setTextColor(Color.BLACK)
+                setTextColor(C.TEXT)
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             }
             sv.addView(et, MATCH, WRAP)
