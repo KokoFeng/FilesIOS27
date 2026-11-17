@@ -33,6 +33,8 @@ const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 object C {
     val BLUE = 0xFF007AFF.toInt()
     var dark = false
+    var textScale = 1f
+    val SETCARD: Int get() = if (dark) 0xFF1C1C1E.toInt() else 0xFFE9E9EB.toInt()
     val BG: Int get() = if (dark) 0xFF000000.toInt() else 0xFFF2F2F7.toInt()
     val TEXT: Int get() = if (dark) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
     val CARD: Int get() = if (dark) 0xFF1C1C1E.toInt() else 0xFFFFFFFF.toInt()
@@ -77,13 +79,13 @@ object P {
     const val BACK = "M15,5L8,12L15,19"
     const val CHEV = "M9,5L16,12L9,19"
     const val SEARCH = "M10.5,4a6.5,6.5 0 1,0 0,13a6.5,6.5 0 1,0 0,-13 M15.5,15.5L20,20"
-    const val MIC = "M12,3a3,3 0 0,0 -3,3v5a3,3 0 0,0 6,0V6a3,3 0 0,0 -3,-3z M6,11a6,6 0 0,0 12,0 M12,17v4"
+    const val MIC = "M12,3.2a2.8,2.8 0 0,0 -2.8,2.8v5.2a2.8,2.8 0 0,0 5.6,0V6a2.8,2.8 0 0,0 -2.8,-2.8z M6,11a6,6 0 0,0 12,0 M12,17v3.5"
     const val MORE = "M6,12L6.01,12M12,12L12.01,12M18,12L18.01,12"
     const val COPY = "M8,8h11v12h-11z M5,16V4h11"
-    const val FOLDER = "M3,7a2,2 0 0,1 2,-2h4l2,2h8a2,2 0 0,1 2,2v8a2,2 0 0,1 -2,2h-14a2,2 0 0,1 -2,-2z"
-    const val NEWFOLDER = "M3,7a2,2 0 0,1 2,-2h4l2,2h8a2,2 0 0,1 2,2v8a2,2 0 0,1 -2,2h-14a2,2 0 0,1 -2,-2z M12,10v5 M9.5,12.5h5"
+    const val FOLDER = "M5,6.5h3.4a1,1 0 0,1 .8,.4l.9,1.2a1,1 0 0,0 .8,.4H19a1.5,1.5 0 0,1 1.5,1.5v8a1.5,1.5 0 0,1 -1.5,1.5H5a1.5,1.5 0 0,1 -1.5,-1.5V8A1.5,1.5 0 0,1 5,6.5z"
+    const val NEWFOLDER = "M5,6.5h3.4a1,1 0 0,1 .8,.4l.9,1.2a1,1 0 0,0 .8,.4H19a1.5,1.5 0 0,1 1.5,1.5v8a1.5,1.5 0 0,1 -1.5,1.5H5a1.5,1.5 0 0,1 -1.5,-1.5V8A1.5,1.5 0 0,1 5,6.5z M12,11.5v5 M9.5,14h5"
     const val SHARE = "M12,15V4 M8,8l4,-4l4,4 M6,11H5v9h14v-9h-1"
-    const val TRASH = "M5,7h14 M10,7V4h4v3 M7,7l1,13h8l1,-13"
+    const val TRASH = "M4.5,7h15 M9.5,7V5.2a1,1 0 0,1 1,-1h3a1,1 0 0,1 1,1V7 M6.5,7l.8,11.5a2,2 0 0,0 2,1.9h5.4a2,2 0 0,0 2,-1.9L17.5,7 M10,10.5v6 M14,10.5v6"
     const val INFO = "M12,3a9,9 0 1,0 0,18a9,9 0 1,0 0,-18 M12,11v6 M12,7.5L12.01,7.5"
     const val PENCIL = "M4,20l1,-4l11,-11l3,3l-11,11z"
     const val ARCHIVE = "M4,5h16v4h-16z M5,9v10h14v-10 M10,13h4"
@@ -94,29 +96,32 @@ object P {
     const val DOWNLOAD = "M12,4v11 M7,11l5,5l5,-5 M5,20h14"
     const val CLOCK = "M12,3a9,9 0 1,0 0,18a9,9 0 1,0 0,-18 M12,7v5l3,2"
     const val PEOPLE = "M9,8a3,3 0 1,0 0.01,0 M3,20c0,-4 3,-6 6,-6s6,2 6,6 M17,8a2.5,2.5 0 1,0 0.01,0 M17,14c3,0 4,2 4,5"
-    const val PHONE = "M8,3h8a1.5,1.5 0 0,1 1.5,1.5v15a1.5,1.5 0 0,1 -1.5,1.5h-8a1.5,1.5 0 0,1 -1.5,-1.5v-15a1.5,1.5 0 0,1 1.5,-1.5z M11,18h2"
+    const val PHONE = "M8.5,2.8h7a2,2 0 0,1 2,2v14.4a2,2 0 0,1 -2,2h-7a2,2 0 0,1 -2,-2V4.8a2,2 0 0,1 2,-2z M10.7,18.2h2.6"
     const val CHECK = "M5,12.5L10,17.5L19,7"
     const val GRID = "M4,4h6v6h-6z M14,4h6v6h-6z M4,14h6v6h-6z M14,14h6v6h-6z"
     const val LIST = "M4,6h16 M4,12h16 M4,18h16"
-    const val PLAY = "M7,4L20,12L7,20z"
-    const val PAUSE = "M6,4h4v16h-4z M14,4h4v16h-4z"
-    const val SHAREDFOLDER = "M3,7a2,2 0 0,1 2,-2h4l2,2h8a2,2 0 0,1 2,2v8a2,2 0 0,1 -2,2h-14a2,2 0 0,1 -2,-2z M12,9.5a1.5,1.5 0 1,0 0.01,0 M9.5,16c0,-2 1.2,-3 2.5,-3s2.5,1 2.5,3"
-    const val CLOUD = "M7,18a4,4 0 0,1 -0.5,-8a5.5,5.5 0 0,1 10.7,-1.2a4.2,4.2 0 0,1 0.8,9.2z"
+    const val PLAY = "M8.2,5.4a1,1 0 0,0 -1.5,.9v11.4a1,1 0 0,0 1.5,.9l9.5,-5.7a1,1 0 0,0 0,-1.7z"
+    const val PAUSE = "M7,3.5h2.2a1.2,1.2 0 0,1 1.2,1.2v14.6a1.2,1.2 0 0,1 -1.2,1.2H7a1.2,1.2 0 0,1 -1.2,-1.2V4.7A1.2,1.2 0 0,1 7,3.5z M14.8,3.5h2.2a1.2,1.2 0 0,1 1.2,1.2v14.6a1.2,1.2 0 0,1 -1.2,1.2h-2.2a1.2,1.2 0 0,1 -1.2,-1.2V4.7a1.2,1.2 0 0,1 1.2,-1.2z"
+    const val SHAREDFOLDER = "M5,6.5h3.4a1,1 0 0,1 .8,.4l.9,1.2a1,1 0 0,0 .8,.4H19a1.5,1.5 0 0,1 1.5,1.5v8a1.5,1.5 0 0,1 -1.5,1.5H5a1.5,1.5 0 0,1 -1.5,-1.5V8A1.5,1.5 0 0,1 5,6.5z M18,3.6a2.6,2.6 0 1,0 .01,0z M18,5.2a.7,.7 0 1,0 .01,0 M16.8,7.6c.3,-.7 .8,-1 1.2,-1s.9,.3 1.2,1"
+    const val CLOUD = "M7.5,18.5a4,4 0 0,1 -.6,-7.95a5.5,5.5 0 0,1 10.6,-.6a4.3,4.3 0 0,1 -.4,8.55z"
     const val MARKUP = "M12,3a9,9 0 1,0 0,18a9,9 0 1,0 0,-18 M8.5,16l3.5,-9l3.5,9 M9.8,13h4.4"
-    const val DESKTOP = "M4,5h16a1,1 0 0,1 1,1v10a1,1 0 0,1 -1,1h-16a1,1 0 0,1 -1,-1v-10a1,1 0 0,1 1,-1z M7,13.5h10"
+    const val DESKTOP = "M5,5h14a1.5,1.5 0 0,1 1.5,1.5v9a1.5,1.5 0 0,1 -1.5,1.5H5a1.5,1.5 0 0,1 -1.5,-1.5v-9A1.5,1.5 0 0,1 5,5z M3.5,12.5h17 M9,19.5h6 M12,17v2.5"
     const val DOCGLYPH = "M7,3h7l4,4v13a1,1 0 0,1 -1,1h-10a1,1 0 0,1 -1,-1v-16a1,1 0 0,1 1,-1z M14,3v4h4"
     const val DLCIRCLE = "M12,3a9,9 0 1,0 0,18a9,9 0 1,0 0,-18 M12,8v8 M8.5,12.5l3.5,3.5l3.5,-3.5"
-    const val PHOTO = "M4,5h16v14h-16z M4,16l5,-5l4,4l3,-3l4,4 M15.5,9.5a1,1 0 1,0 0.01,0"
-    const val FILM = "M4,5h16v14h-16z M10,9l5,3l-5,3z"
-    const val CAMERA = "M4,8h3l2,-3h6l2,3h3v11h-16z M12,10a3.5,3.5 0 1,0 0.01,0"
+    const val PHOTO = "M5.5,4.5h13a2,2 0 0,1 2,2v11a2,2 0 0,1 -2,2h-13a2,2 0 0,1 -2,-2v-11a2,2 0 0,1 2,-2z M3.5,16.2l4.6,-4.6a1,1 0 0,1 1.4,0l4.5,4.5 M13.2,14.3l1.9,-1.9a1,1 0 0,1 1.4,0l4,4 M8.2,9.3a1.2,1.2 0 1,0 .01,0"
+    const val FILM = "M5.5,5h13a2,2 0 0,1 2,2v10a2,2 0 0,1 -2,2h-13a2,2 0 0,1 -2,-2v-10a2,2 0 0,1 2,-2z M10.2,9.2l4.6,2.8l-4.6,2.8z"
+    const val CAMERA = "M4.5,8h2.2l1.1,-1.8a1,1 0 0,1 .9,-.5h6.6a1,1 0 0,1 .9,.5l1.1,1.8h2.2a1.5,1.5 0 0,1 1.5,1.5v8a1.5,1.5 0 0,1 -1.5,1.5h-15a1.5,1.5 0 0,1 -1.5,-1.5v-8A1.5,1.5 0 0,1 4.5,8z M12,10.2a3.3,3.3 0 1,0 .01,0"
     const val PACKAGE = "M12,3l8,4v10l-8,4l-8,-4v-10z M4,7l8,4l8,-4 M12,11v10"
     const val APPA = "M12,4l-6,14 M12,4l6,14 M8,13.5h8"
     const val CLOSE = "M6,6L18,18 M18,6L6,18"
     const val OPENIN = "M14,4h6v6 M20,4l-9,9 M18,14v4a2,2 0 0,1 -2,2h-9a2,2 0 0,1 -2,-2v-9a2,2 0 0,1 2,-2h4"
-    const val DOCS = "M8,7h8l3,3v10h-11z M16,7v3h3 M5,16V4h8"
-    const val SYNC = "M12,3a9,9 0 1,0 0,18a9,9 0 1,0 0,-18 M12,7v5l3,2"
+    const val DOCS = "M8.5,8.5a1.5,1.5 0 0,1 1.5,-1.5h4.5l4,4v7.5a1.5,1.5 0 0,1 -1.5,1.5h-7a1.5,1.5 0 0,1 -1.5,-1.5z M14.5,7v3.5a.5,.5 0 0,0 .5,.5h3.5 M6,16H5.5A1.5,1.5 0 0,1 4,14.5V5.5A1.5,1.5 0 0,1 5.5,4H12"
+    const val SYNC = "M12,3.5a8.5,8.5 0 1,0 .01,0z M12,7.5V12l3.2,1.8"
     const val GEAR = "M12,9a3,3 0 1,0 0.01,0 M12,3v3 M12,18v3 M3,12h3 M18,12h3 M5.6,5.6l2.1,2.1 M16.3,16.3l2.1,2.1 M5.6,18.4l2.1,-2.1 M16.3,7.7l2.1,-2.1"
-    const val NOTE = "M9,18V5l12,-2v13 M9,18a3,3 0 1,1 -6,0a3,3 0 0,1 6,0 M21,16a3,3 0 1,1 -6,0a3,3 0 0,1 6,0"
+    const val GLOBE = "M12,2.5a9.5,9.5 0 1,0 .01,0z M12,2.5c-4,2.5 -4,16.5 0,19 M12,2.5c4,2.5 4,16.5 0,19 M2.5,12h19 M4,7.2c5,2 11,2 16,0 M4,16.8c5,-2 11,-2 16,0"
+    const val AIRPLAYF = "M6.5,17H5.5a2,2 0 0,1 -2,-2V6.5a2,2 0 0,1 2,-2h13a2,2 0 0,1 2,2V15a2,2 0 0,1 -2,2h-1"
+    const val AIRPLAYT = "M12,14.2L17.2,20.5H6.8z"
+    const val NOTE = "M9,17.5V6.2l9,-2v11.3 M9,17.5a2.5,2.5 0 1,1 -5,0a2.5,2.5 0 0,1 5,0z M18,15.5a2.5,2.5 0 1,1 -5,0a2.5,2.5 0 0,1 5,0z"
 }
 
 class IconDrawable(private val pathData: String, col: Int, private val stroke: Boolean = true, sw: Float = 1.8f) : Drawable() {
@@ -147,7 +152,7 @@ class IconDrawable(private val pathData: String, col: Int, private val stroke: B
 
 fun Context.icon(path: String, col: Int, sizeDp: Int, stroke: Boolean = true, sw: Float = 1.8f): ImageView =
     ImageView(this).apply {
-        setImageDrawable(IconDrawable(path, col, stroke, sw))
+        setImageDrawable(if (path == P.GEAR) MaskIconDrawable(R.drawable.ic_settings, col) else IconDrawable(path, col, stroke, sw))
         layoutParams = ViewGroup.LayoutParams(dpi(sizeDp), dpi(sizeDp))
     }
 
@@ -231,31 +236,29 @@ class GlassDrawable(
         p.style = Paint.Style.FILL
         p.shader = LinearGradient(0f, r.top, 0f, r.bottom, adapt(top), adapt(bottom), Shader.TileMode.CLAMP)
         c.drawRoundRect(r, rd, rd, p)
-        p.shader = LinearGradient(
-            0f, r.top, 0f, r.top + r.height() * 0.5f,
-            if (dark) 0x26FFFFFF else 0x66FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP
-        )
-        c.drawRoundRect(r, rd, rd, p)
-        val sw = 1.3f * d
+        val darkish = C.dark || dark
+        // garis luar sangat tipis supaya tepi tetap terbaca di latar terang
+        if (!darkish) {
+            val h = 0.25f * d
+            r.set(b.left + h, b.top + h, b.right - h, b.bottom - h)
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 0.5f * d
+            p.shader = null
+            p.color = 0x14000000
+            c.drawRoundRect(r, maxOf(0f, rd - h), maxOf(0f, rd - h), p)
+        }
+        // rim: terang di kiri atas dan kanan bawah, hampir bening di tengah
+        val sw = 1.0f * d
         r.set(b.left + sw / 2, b.top + sw / 2, b.right - sw / 2, b.bottom - sw / 2)
         p.style = Paint.Style.STROKE
         p.strokeWidth = sw
-        val rim = if (dark) intArrayOf(0x99FFFFFF.toInt(), 0x14FFFFFF, 0x14FFFFFF, 0x66FFFFFF)
-        else intArrayOf(0xF2FFFFFF.toInt(), 0x30FFFFFF, 0x30FFFFFF, 0xCCFFFFFF.toInt())
+        val rim = if (darkish) intArrayOf(0x73FFFFFF, 0x0FFFFFFF, 0x0FFFFFFF, 0x4DFFFFFF)
+        else intArrayOf(0xCCFFFFFF.toInt(), 0x33FFFFFF, 0x33FFFFFF, 0xA6FFFFFF.toInt())
         p.shader = LinearGradient(
             b.left.toFloat(), b.top.toFloat(), b.right.toFloat(), b.bottom.toFloat(),
-            rim, floatArrayOf(0f, 0.32f, 0.68f, 1f), Shader.TileMode.CLAMP
+            rim, floatArrayOf(0f, 0.3f, 0.7f, 1f), Shader.TileMode.CLAMP
         )
         c.drawRoundRect(r, maxOf(0f, rd - sw / 2), maxOf(0f, rd - sw / 2), p)
-        val s2 = 3f * d
-        r.set(b.left + sw + s2 / 2, b.top + sw + s2 / 2, b.right - sw - s2 / 2, b.bottom - sw - s2 / 2)
-        p.strokeWidth = s2
-        p.shader = LinearGradient(
-            0f, b.top.toFloat(), 0f, b.bottom.toFloat(),
-            if (dark) 0x14FFFFFF else 0x2EFFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP
-        )
-        val ir = maxOf(0f, rd - sw - s2 / 2)
-        c.drawRoundRect(r, ir, ir, p)
         p.shader = null
     }
 
@@ -282,12 +285,12 @@ class NotifyFrame(ctx: Context) : FrameLayout(ctx) {
 /** Parameter efek liquid, mengikuti LiquidScope milik FletchMcKee/liquid. */
 class LiquidParams(
     var frost: Float = 8f,            // dp, blur latar (Android 12+)
-    var refraction: Float = 0.5f,     // 0..1 seberapa jauh latar dibelokkan (Android 13+)
+    var refraction: Float = 0.35f,     // 0..1 seberapa jauh latar dibelokkan (Android 13+)
     var curve: Float = 0.5f,          // 0..1 kelengkungan lensa pusat vs tepi (Android 13+)
-    var edge: Float = 0.12f,          // kilau pinggiran
-    var tintColor: Int = 0x2EFFFFFF,
+    var edge: Float = 0.06f,          // kilau pinggiran
+    var tintColor: Int = 0x24FFFFFF,
     var saturation: Float = 1.5f,
-    var dispersion: Float = 0.25f,    // aberasi kromatik di tepi (Android 13+)
+    var dispersion: Float = 0.12f,    // aberasi kromatik di tepi (Android 13+)
     var contrast: Float = 0f
 )
 
@@ -336,7 +339,7 @@ class GlassBackdropView(
                 sdRound(p + float2(1.0, 0.0), hs, cornerR) - sdRound(p - float2(1.0, 0.0), hs, cornerR),
                 sdRound(p + float2(0.0, 1.0), hs, cornerR) - sdRound(p - float2(0.0, 1.0), hs, cornerR));
             float2 n = g / max(length(g), 0.0001);
-            float bevel = min(viewSize.x, viewSize.y) * 0.5 * (0.35 + 0.65 * curve);
+            float bevel = min(viewSize.x, viewSize.y) * 0.5 * (0.25 + 0.5 * curve);
             float t = clamp(-d / bevel, 0.0, 1.0);
             float m = maxOffset * pow(1.0 - t, 2.0 + 1.5 * (1.0 - curve));
             float2 off = n * m;
@@ -641,6 +644,7 @@ class IosEditText(ctx: Context) : EditText(ctx) {
     init {
         isCursorVisible = false
         background = null
+        typeface = Fonts.regular
         highlightColor = 0x55007AFF
     }
 
@@ -759,7 +763,7 @@ class TabIcon(private val kind: Int, col: Int) : Drawable() {
         c.translate(b.left.toFloat(), b.top.toFloat())
         c.scale(s, s)
         c.drawPath(paths[kind], fill)
-        if (kind == 0) { st.color = Color.WHITE; st.strokeWidth = 1.9f; c.drawPath(hands, st) }
+        if (kind == 0) { st.color = if (C.dark) 0xFF1C1C1E.toInt() else Color.WHITE; st.strokeWidth = 1.9f; c.drawPath(hands, st) }
         if (kind == 2) { st.color = 0x59FFFFFF; st.strokeWidth = 1.1f; c.drawPath(line, st) }
         c.restore()
     }
@@ -897,5 +901,222 @@ class IosSwitch(ctx: Context) : View(ctx) {
         c.drawCircle(cx, h / 2 + d, kr, p)
         p.color = Color.WHITE
         c.drawCircle(cx, h / 2, kr, p)
+    }
+}
+
+/** Font SF Pro (dari aset yang diberikan user, sudah di-subset). */
+object Fonts {
+    private fun load(path: String, fallback: Typeface): Typeface =
+        try { Typeface.createFromAsset(Thumbs.ctx.assets, path) } catch (e: Throwable) { fallback }
+    val regular: Typeface by lazy { load("fonts/SF-Pro-Text-Regular.otf", Typeface.DEFAULT) }
+    val semibold: Typeface by lazy { load("fonts/SF-Pro-Text-Semibold.otf", Typeface.DEFAULT_BOLD) }
+    val display: Typeface by lazy { load("fonts/SF-Pro-Display-Bold.otf", Typeface.DEFAULT_BOLD) }
+}
+
+/** Ikon dari bitmap (mask alfa) yang diwarnai, dipakai untuk ikon Settings dari user. */
+class MaskIconDrawable(private val res: Int, col: Int) : Drawable() {
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+        colorFilter = PorterDuffColorFilter(col, PorterDuff.Mode.SRC_IN)
+    }
+    private val bm: Bitmap by lazy { BitmapFactory.decodeResource(Thumbs.ctx.resources, res) }
+    override fun draw(c: Canvas) { c.drawBitmap(bm, null, bounds, p) }
+    override fun setAlpha(a: Int) { p.alpha = a }
+    override fun setColorFilter(f: ColorFilter?) {}
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/** Spinner iOS (12 jarum) dari im_loading.png, berputar per 30 derajat seperti aslinya. */
+class SpinnerDrawable(private val tint: Int?, private val size: Int = -1) : Drawable(), android.graphics.drawable.Animatable {
+    private var step = 0
+    private var running = false
+    private val h = Handler(Looper.getMainLooper())
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val bm: Bitmap by lazy { BitmapFactory.decodeResource(Thumbs.ctx.resources, R.drawable.im_loading) }
+    private val tick = object : Runnable {
+        override fun run() {
+            step = (step + 1) % 12
+            invalidateSelf()
+            if (running) h.postDelayed(this, 83)
+        }
+    }
+
+    init { if (tint != null) p.colorFilter = PorterDuffColorFilter(tint, PorterDuff.Mode.SRC_IN) }
+
+    override fun start() { if (running) return; running = true; h.postDelayed(tick, 83) }
+    override fun stop() { running = false; h.removeCallbacks(tick) }
+    override fun isRunning() = running
+    override fun getIntrinsicWidth() = size
+    override fun getIntrinsicHeight() = size
+
+    override fun draw(c: Canvas) {
+        val b = bounds
+        c.save()
+        c.rotate(step * 30f, b.exactCenterX(), b.exactCenterY())
+        c.drawBitmap(bm, null, b, p)
+        c.restore()
+    }
+
+    override fun setAlpha(a: Int) { p.alpha = a }
+    override fun setColorFilter(f: ColorFilter?) {}
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/** Scrubber pemutar ala iOS: jalur tipis dan kenop putih kecil. */
+class ScrubView(ctx: Context) : View(ctx) {
+    var max = 1
+    var progress = 0
+    var onSeek: ((Int) -> Unit)? = null
+    var onStart: (() -> Unit)? = null
+    var onStop: (() -> Unit)? = null
+    private val d = ctx.resources.displayMetrics.density
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var dragging = false
+
+    override fun onMeasure(w: Int, h: Int) {
+        setMeasuredDimension(View.MeasureSpec.getSize(w), (24 * d).toInt())
+    }
+
+    override fun onDraw(c: Canvas) {
+        val cy = height / 2f
+        val th = 4 * d
+        val kr = 6 * d
+        val x0 = kr
+        val x1 = width - kr
+        val frac = if (max > 0) (progress.toFloat() / max).coerceIn(0f, 1f) else 0f
+        val kx = x0 + (x1 - x0) * frac
+        p.style = Paint.Style.FILL
+        p.color = 0xFF48484A.toInt()
+        c.drawRoundRect(RectF(x0, cy - th / 2, x1, cy + th / 2), th / 2, th / 2, p)
+        p.color = 0xFFD1D1D6.toInt()
+        c.drawRoundRect(RectF(x0, cy - th / 2, kx, cy + th / 2), th / 2, th / 2, p)
+        p.color = Color.WHITE
+        c.drawCircle(kx, cy, (if (dragging) 8 else 6) * d, p)
+    }
+
+    private fun upd(x: Float) {
+        val kr = 6 * d
+        val frac = ((x - kr) / (width - 2 * kr)).coerceIn(0f, 1f)
+        progress = (frac * max).toInt()
+        onSeek?.invoke(progress)
+        invalidate()
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { dragging = true; parent?.requestDisallowInterceptTouchEvent(true); onStart?.invoke(); upd(e.x) }
+            MotionEvent.ACTION_MOVE -> upd(e.x)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { dragging = false; onStop?.invoke(); invalidate() }
+        }
+        return true
+    }
+}
+
+/** Ikon "mundur / maju 15 detik" ala iOS. */
+class SkipDrawable(private val forward: Boolean, private val col: Int) : Drawable() {
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    override fun draw(c: Canvas) {
+        val b = bounds
+        val s = b.width().toFloat()
+        c.save()
+        c.translate(b.left.toFloat(), b.top.toFloat())
+        val cx = s / 2
+        val cy = s * 0.54f
+        val r = s * 0.38f
+        c.save()
+        if (!forward) { c.scale(-1f, 1f); c.translate(-s, 0f) }
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = s * 0.075f
+        p.strokeCap = Paint.Cap.ROUND
+        p.color = col
+        c.drawArc(RectF(cx - r, cy - r, cx + r, cy + r), -55f, 290f, false, p)
+        val th = Math.toRadians(235.0)
+        val px = cx + r * Math.cos(th).toFloat()
+        val py = cy + r * Math.sin(th).toFloat()
+        val dx = (-Math.sin(th)).toFloat()
+        val dy = Math.cos(th).toFloat()
+        val nx = Math.cos(th).toFloat()
+        val ny = Math.sin(th).toFloat()
+        val hl = s * 0.15f
+        val hw = s * 0.1f
+        val path = Path()
+        path.moveTo(px + dx * hl, py + dy * hl)
+        path.lineTo(px + nx * hw, py + ny * hw)
+        path.lineTo(px - nx * hw, py - ny * hw)
+        path.close()
+        p.style = Paint.Style.FILL
+        c.drawPath(path, p)
+        c.restore()
+        p.style = Paint.Style.FILL
+        p.textAlign = Paint.Align.CENTER
+        p.typeface = Fonts.semibold
+        p.textSize = s * 0.33f
+        c.drawText("15", cx, cy + s * 0.12f, p)
+        c.restore()
+    }
+
+    override fun setAlpha(a: Int) { p.alpha = a }
+    override fun setColorFilter(f: ColorFilter?) {}
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/** Slider 3 langkah (Default / Medium / Large) seperti layar Appearance iOS. */
+class StepSlider(ctx: Context) : View(ctx) {
+    var step = 0
+        private set
+    var onStep: ((Int) -> Unit)? = null
+    private var pos = 0f
+    private var anim: ValueAnimator? = null
+    private val d = ctx.resources.displayMetrics.density
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    fun setStep(s: Int) { step = s; pos = s / 2f; invalidate() }
+
+    override fun onMeasure(w: Int, h: Int) {
+        setMeasuredDimension(View.MeasureSpec.getSize(w), (44 * d).toInt())
+    }
+
+    override fun onDraw(c: Canvas) {
+        val cy = height / 2f
+        val l = 16 * d
+        val rt = width - 16 * d
+        val kx = l + (rt - l) * pos
+        p.style = Paint.Style.FILL
+        p.color = if (C.dark) 0xFF3A3A3C.toInt() else 0xFFE5E5EA.toInt()
+        c.drawRoundRect(RectF(l, cy - 1.5f * d, rt, cy + 1.5f * d), 2 * d, 2 * d, p)
+        p.color = C.BLUE
+        c.drawRoundRect(RectF(l, cy - 1.5f * d, kx, cy + 1.5f * d), 2 * d, 2 * d, p)
+        p.color = 0x22000000
+        c.drawCircle(kx, cy + 1.5f * d, 14 * d, p)
+        p.color = Color.WHITE
+        c.drawCircle(kx, cy, 14 * d, p)
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        val l = 16 * d
+        val rt = width - 16 * d
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                anim?.cancel()
+                pos = ((e.x - l) / (rt - l)).coerceIn(0f, 1f)
+                invalidate()
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val ns = Math.round(pos * 2f)
+                anim?.cancel()
+                anim = ValueAnimator.ofFloat(pos, ns / 2f).apply {
+                    duration = 200
+                    interpolator = IOS_EASE
+                    addUpdateListener { pos = it.animatedValue as Float; invalidate() }
+                    start()
+                }
+                if (ns != step) { step = ns; onStep?.invoke(ns) }
+            }
+        }
+        return true
     }
 }

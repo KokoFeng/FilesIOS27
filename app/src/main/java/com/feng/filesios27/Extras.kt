@@ -77,10 +77,11 @@ fun MainActivity.haptic() {
 fun MainActivity.applyGlassStyle() {
     val g = glassView ?: return
     val tinted = prefs.getInt("glass", 0) == 1
-    g.params.tintColor = if (tinted) 0x4DFFFFFF else 0x1AFFFFFF
-    g.params.refraction = if (tinted) 0.35f else 0.6f
-    g.params.frost = if (tinted) 12f else 6f
-    g.params.dispersion = if (tinted) 0.15f else 0.3f
+    g.params.tintColor = if (tinted) 0x40FFFFFF else 0x14FFFFFF
+    g.params.refraction = if (tinted) 0.25f else 0.4f
+    g.params.frost = if (tinted) 12f else 7f
+    g.params.dispersion = if (tinted) 0.08f else 0.12f
+    g.params.edge = if (tinted) 0.04f else 0.07f
     g.applyParams()
 }
 
@@ -513,6 +514,15 @@ fun MainActivity.settingsPage(): View {
                     Btn("Clear") { setGlass(0); fill() }, Btn("Tinted") { setGlass(1); fill() }
                 ))
             },
+            valueRow("Text Size", arrayOf("Default", "Medium", "Large")[prefs.getInt("textscale", 0).coerceIn(0, 2)]) {
+                actionSheet("Text Size", null, listOf("Default", "Medium", "Large").mapIndexed { i, n ->
+                    Btn(n) {
+                        prefs.edit().putInt("textscale", i).apply()
+                        C.textScale = floatArrayOf(1f, 1.1f, 1.25f)[i]
+                        applyTheme(true)
+                    }
+                })
+            },
             switchRow("Reduce Transparency", prefs.getBoolean("reduce", false)) { on ->
                 prefs.edit().putBoolean("reduce", on).apply()
                 rebuildBar()
@@ -535,12 +545,14 @@ fun MainActivity.settingsPage(): View {
             switchRow("Haptic Feedback", prefs.getBoolean("haptics", true)) { on -> prefs.edit().putBoolean("haptics", on).apply() }
         ))
         settingsGroup(col, "General", null, listOf(
+            navRow("Run Setup Again", C.TEXT) { prefs.edit().putBoolean("setup_done", false).apply(); showSetup(0) },
             navRow("Restore Defaults", C.RED) {
                 alert("Restore Defaults?", "Appearance, glass, favorites and view options will return to their original values.", null, 0, listOf(
                     Btn("Cancel"),
                     Btn("Restore", 2) {
                         prefs.edit().remove("theme").remove("glass").remove("reduce").remove("grid").remove("sort")
-                            .remove("haptics").remove("fav_hidden").remove("fav_custom").apply()
+                            .remove("haptics").remove("fav_hidden").remove("fav_custom").remove("textscale").apply()
+                        C.textScale = 1f
                         gridMode = true
                         sortMode = 0
                         applyTheme(true)

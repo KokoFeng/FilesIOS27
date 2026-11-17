@@ -17,6 +17,7 @@ import android.graphics.Typeface
 import android.graphics.pdf.PdfRenderer
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaPlayer
 import android.net.Uri
@@ -90,6 +91,7 @@ interface Pl {
     fun seek(ms: Int)
     fun play()
     fun pause()
+    fun speed(s: Float) {}
 }
 
 class MainActivity : Activity() {
@@ -112,7 +114,8 @@ class MainActivity : Activity() {
     var viewerCleanup: (() -> Unit)? = null
     val ui = Handler(Looper.getMainLooper())
     val prefs by lazy { getSharedPreferences("files", MODE_PRIVATE) }
-    val df = SimpleDateFormat("M/d/yy", Locale.getDefault())
+    var df = SimpleDateFormat("M/d/yy", Locale.getDefault())
+    var setupStep = -1
     val recentTs = HashMap<String, Long>()
     var locked = false
     var selPage: ListPage? = null
@@ -141,9 +144,9 @@ class MainActivity : Activity() {
 
     fun tv(t: String, sp: Float, col: Int, bold: Boolean = false) = TextView(this).apply {
         text = t
-        textSize = sp
+        textSize = sp * C.textScale
         setTextColor(col)
-        if (bold) typeface = Typeface.DEFAULT_BOLD
+        typeface = if (bold) (if (sp >= 24f) Fonts.display else Fonts.semibold) else Fonts.regular
     }
 
     fun hairline(v: Boolean = false): View = View(this).apply { setBackgroundColor(C.SEP) }
@@ -179,6 +182,8 @@ class MainActivity : Activity() {
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
         C.dark = resolveDark()
+        C.textScale = floatArrayOf(1f, 1.1f, 1.25f)[prefs.getInt("textscale", 0).coerceIn(0, 2)]
+        applyLocalePrefs()
         gridMode = prefs.getBoolean("grid", true)
         sortMode = prefs.getInt("sort", 0)
         applyThemeFlags()
@@ -206,13 +211,15 @@ class MainActivity : Activity() {
     fun start() {
         val r = Guard.check(this)
         if (r != null) { tamperLock(r); return }
-        if (hasAccess()) buildMain() else showPermission()
         ui.postDelayed(guardTick, 15000)
+        if (!prefs.getBoolean("setup_done", false)) { showSetup(0); return }
+        if (hasAccess()) buildMain() else showPermission()
     }
 
     override fun onResume() {
         super.onResume()
         if (!started || locked) return
+        if (setupStep >= 0) { if (setupStep == 3 && hasAccess()) finishSetup(); return }
         if (permView != null && hasAccess()) buildMain() else reloadAll()
     }
 
@@ -223,6 +230,7 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(rc: Int, p: Array<out String>, r: IntArray) {
         super.onRequestPermissionsResult(rc, p, r)
+        if (setupStep >= 0) { if (hasAccess()) finishSetup(); return }
         if (hasAccess()) buildMain()
     }
 
@@ -236,6 +244,7 @@ class MainActivity : Activity() {
 
     override fun onBackPressed() {
         if (locked) return
+        if (setupStep >= 0) { if (setupStep > 0) showSetup(setupStep - 1, false); return }
         val o = overlay
         if (o != null) for (i in o.childCount - 1 downTo 0) {
             val t = o.getChildAt(i).tag
@@ -361,7 +370,7 @@ class MainActivity : Activity() {
             val cell = b.getChildAt(i) as LinearLayout
             val sel = i == tab
             val col = if (sel) C.BLUE else C.TEXT
-            cell.background = if (sel) GlassDrawable(dp(28f), 0x24000000, 0x14000000) else null
+            cell.background = if (sel) (if (C.dark) GlassDrawable(dp(28f), 0x33FFFFFF, 0x26FFFFFF, true) else GlassDrawable(dp(28f), 0x24000000, 0x14000000)) else null
             (cell.getChildAt(0) as ImageView).setImageDrawable(TabIcon(cell.tag as Int, col))
             (cell.getChildAt(1) as TextView).setTextColor(col)
         }
@@ -1956,6 +1965,15 @@ class MainActivity : Activity() {
             setPadding(dpi(18), dpi(10), dpi(18), dpi(10))
             elevation = dp(6f)
         }
+        val sd = SpinnerDrawable(Color.WHITE, dpi(18))
+        sd.setBounds(0, 0, dpi(18), dpi(18))
+        t.setCompoundDrawablesRelative(sd, null, null, null)
+        t.compoundDrawablePadding = dpi(8)
+        sd.start()
+        t.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) { sd.start() }
+            override fun onViewDetachedFromWindow(v: View) { sd.stop() }
+        })
         overlay?.addView(t, flp(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = botInset + dpi(100) })
         return t
     }
@@ -2101,47 +2119,83 @@ class MainActivity : Activity() {
     }
 
     fun mediaControls(pl: Pl): View {
+        val grey = 0xFF8E8E93.toInt()
+        val light = 0xFFE5E5EA.toInt()
+        val blue = 0xFF4DA3FF.toInt()
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = rr(0xCC2C2C2E.toInt(), dp(28f))
-            setPadding(dpi(20), dpi(14), dpi(20), dpi(16))
+            background = rr(0xFF262628.toInt(), dp(18f))
+            setPadding(dpi(18), dpi(16), dpi(18), dpi(14))
         }
-        val white = ColorStateList.valueOf(Color.WHITE)
-        val sb = SeekBar(this).apply {
-            progressTintList = white
-            thumbTintList = white
-            progressBackgroundTintList = ColorStateList.valueOf(0x55FFFFFF)
+        fun mmss(ms: Int): String {
+            val s = maxOf(ms, 0) / 1000
+            return String.format(Locale.US, "%02d:%02d", s / 60, s % 60)
         }
-        val cur = tv("0:00", 12f, 0xFFAEAEB2.toInt())
-        val tot = tv("0:00", 12f, 0xFFAEAEB2.toInt())
+        val scrub = ScrubView(this)
+        val cur = tv("00:00", 14f, grey)
+        val rem = tv("\u221200:00", 14f, grey)
         val times = LinearLayout(this)
         times.addView(cur, llp(0, WRAP, 1f))
-        times.addView(tot)
-        val play = ImageView(this).apply {
-            background = oval(Color.WHITE)
-            setPadding(dpi(16), dpi(16), dpi(16), dpi(16))
+        times.addView(rem)
+        fun ic(d: Drawable, sz: Int) = ImageView(this).apply {
+            setImageDrawable(d)
+            layoutParams = ViewGroup.LayoutParams(dpi(sz), dpi(sz))
         }
-        panel.addView(sb)
+        val air = ic(LayerDrawable(arrayOf<Drawable>(IconDrawable(P.AIRPLAYF, blue, true, 1.7f), IconDrawable(P.AIRPLAYT, blue, false))), 28)
+        val back = ic(SkipDrawable(false, light), 36)
+        val playIv = ic(IconDrawable(P.PAUSE, light, false), 36)
+        val fwd = ic(SkipDrawable(true, light), 36)
+        val more = ic(IconDrawable(P.MORE, grey), 28)
+        val left = FrameLayout(this)
+        left.addView(air, flp(dpi(28), dpi(28), Gravity.START or Gravity.CENTER_VERTICAL))
+        val right = FrameLayout(this)
+        right.addView(more, flp(dpi(28), dpi(28), Gravity.END or Gravity.CENTER_VERTICAL))
+        val mid = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        mid.addView(back)
+        mid.addView(playIv, llp(dpi(36), dpi(36)).apply { marginStart = dpi(32); marginEnd = dpi(32) })
+        mid.addView(fwd)
+        val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        row.addView(left, llp(0, dpi(40), 1f))
+        row.addView(mid)
+        row.addView(right, llp(0, dpi(40), 1f))
+        panel.addView(scrub, llp(MATCH, WRAP))
         panel.addView(times)
-        panel.addView(play, llp(dpi(60), dpi(60)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dpi(8) })
+        panel.addView(row, llp(MATCH, WRAP).apply { topMargin = dpi(12) })
+
         var seeking = false
-        sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) try { pl.seek(p) } catch (e: Exception) {} }
-            override fun onStartTrackingTouch(s: SeekBar?) { seeking = true }
-            override fun onStopTrackingTouch(s: SeekBar?) { seeking = false }
-        })
-        play.setOnClickListener { try { if (pl.playing()) pl.pause() else pl.play() } catch (e: Exception) {} }
+        scrub.onStart = { seeking = true }
+        scrub.onStop = { seeking = false }
+        scrub.onSeek = { p ->
+            try { pl.seek(p) } catch (e: Exception) {}
+            cur.text = mmss(p)
+            rem.text = "\u2212" + mmss(scrub.max - p)
+        }
+        playIv.setOnClickListener { try { if (pl.playing()) pl.pause() else pl.play() } catch (e: Exception) {} }
+        back.setOnClickListener { try { pl.seek(maxOf(pl.pos() - 15000, 0)) } catch (e: Exception) {} }
+        fwd.setOnClickListener { try { pl.seek(minOf(pl.pos() + 15000, pl.dur())) } catch (e: Exception) {} }
+        air.setOnClickListener {
+            try { startActivity(Intent(Settings.ACTION_CAST_SETTINGS)) } catch (e: Exception) { toast("Cast isn't available on this phone") }
+        }
+        more.setOnClickListener {
+            actionSheet("Playback Speed", null, listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).map { s ->
+                Btn(if (s == 1f) "Normal" else "$s\u00D7") { pl.speed(s) }
+            })
+        }
         val tick = object : Runnable {
             override fun run() {
                 if (!panel.isAttachedToWindow) return
                 try {
                     val d = pl.dur()
-                    if (d > 0) { sb.max = d; if (!seeking) sb.progress = pl.pos() }
-                    cur.text = fmt(pl.pos())
-                    tot.text = fmt(d)
-                    play.setImageDrawable(IconDrawable(if (pl.playing()) P.PAUSE else P.PLAY, Color.BLACK, false))
+                    if (d > 0) scrub.max = d
+                    if (!seeking) {
+                        scrub.progress = pl.pos()
+                        scrub.invalidate()
+                        cur.text = mmss(pl.pos())
+                        rem.text = "\u2212" + mmss(d - pl.pos())
+                    }
+                    playIv.setImageDrawable(IconDrawable(if (pl.playing()) P.PAUSE else P.PLAY, light, false))
                 } catch (e: Exception) { return }
-                ui.postDelayed(this, 250)
+                ui.postDelayed(this, 200)
             }
         }
         ui.post(tick)
@@ -2153,7 +2207,8 @@ class MainActivity : Activity() {
             val vv = VideoView(this)
             v.addView(vv, flp(MATCH, MATCH, Gravity.CENTER))
             vv.setVideoPath(f.absolutePath)
-            vv.setOnPreparedListener { it.isLooping = false; vv.start() }
+            var vmp: MediaPlayer? = null
+            vv.setOnPreparedListener { vmp = it; it.isLooping = false; vv.start() }
             viewerCleanup = { vv.stopPlayback() }
             val pl = object : Pl {
                 override fun playing() = vv.isPlaying
@@ -2162,6 +2217,14 @@ class MainActivity : Activity() {
                 override fun seek(ms: Int) = vv.seekTo(ms)
                 override fun play() = vv.start()
                 override fun pause() = vv.pause()
+                override fun speed(s: Float) {
+                    try {
+                        val mpl = vmp ?: return
+                        val was = vv.isPlaying
+                        mpl.playbackParams = android.media.PlaybackParams().setSpeed(s)
+                        if (!was) vv.pause()
+                    } catch (e: Exception) {}
+                }
             }
             v.addView(mediaControls(pl), flp(MATCH, WRAP, Gravity.BOTTOM).apply { setMargins(dpi(16), 0, dpi(16), botInset + dpi(16)) })
         }
@@ -2195,6 +2258,14 @@ class MainActivity : Activity() {
                 override fun seek(ms: Int) { if (ready) mp.seekTo(ms) }
                 override fun play() { if (ready) mp.start() }
                 override fun pause() { if (ready) mp.pause() }
+                override fun speed(s: Float) {
+                    try {
+                        if (!ready) return
+                        val was = mp.isPlaying
+                        mp.playbackParams = android.media.PlaybackParams().setSpeed(s)
+                        if (!was) mp.pause()
+                    } catch (e: Exception) {}
+                }
             }
             v.addView(mediaControls(pl), flp(MATCH, WRAP, Gravity.BOTTOM).apply { setMargins(dpi(16), 0, dpi(16), botInset + dpi(16)) })
         }
