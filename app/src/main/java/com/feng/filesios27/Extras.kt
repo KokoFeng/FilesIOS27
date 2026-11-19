@@ -77,7 +77,7 @@ fun MainActivity.haptic() {
 fun MainActivity.applyGlassStyle() {
     val g = glassView ?: return
     val tinted = prefs.getInt("glass", 0) == 1
-    g.params.tintColor = if (tinted) 0x40FFFFFF else 0x14FFFFFF
+    g.params.tintColor = if (C.dark) (if (tinted) 0x55000000 else 0x33000000) else (if (tinted) 0x40FFFFFF else 0x14FFFFFF)
     g.params.refraction = if (tinted) 0.25f else 0.4f
     g.params.frost = if (tinted) 12f else 7f
     g.params.dispersion = if (tinted) 0.08f else 0.12f
@@ -859,4 +859,26 @@ fun MainActivity.finishSave(dst: File) {
     addRecent(dst)
     reloadAll()
     if (FileOps.ext(dst) in INSTALLABLE) chooseAction(dst) else toast("Downloaded")
+}
+
+// ====================================================================================
+// Warna folder
+// ====================================================================================
+fun MainActivity.setFolderColor(f: File, idx: Int) {
+    if (idx <= 0) {
+        FolderColors.map.remove(f.path)
+        prefs.edit().remove("fc:" + f.path).apply()
+    } else {
+        FolderColors.map[f.path] = idx
+        prefs.edit().putInt("fc:" + f.path, idx).apply()
+    }
+    reloadAll()
+}
+
+fun MainActivity.folderColorMenu(f: File, x: Float, y: Float) {
+    val cur = FolderColors.idxOf(f.path)
+    val items = FolderColors.names.indices.map { i ->
+        Mi(FolderColors.names[i], dot = FolderColors.dots[i], check = i == cur) { setFolderColor(f, i) }
+    }
+    showMenu(x, y, null, items)
 }

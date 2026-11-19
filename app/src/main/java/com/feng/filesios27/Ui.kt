@@ -121,6 +121,7 @@ object P {
     const val GLOBE = "M12,2.5a9.5,9.5 0 1,0 .01,0z M12,2.5c-4,2.5 -4,16.5 0,19 M12,2.5c4,2.5 4,16.5 0,19 M2.5,12h19 M4,7.2c5,2 11,2 16,0 M4,16.8c5,-2 11,-2 16,0"
     const val AIRPLAYF = "M6.5,17H5.5a2,2 0 0,1 -2,-2V6.5a2,2 0 0,1 2,-2h13a2,2 0 0,1 2,2V15a2,2 0 0,1 -2,2h-1"
     const val AIRPLAYT = "M12,14.2L17.2,20.5H6.8z"
+    const val PALETTE = "M12,3a9,9 0 1,0 0,18c1.2,0 1.6,-.9 1.2,-1.8c-.5,-1.1 .2,-2.2 1.5,-2.2H17a4,4 0 0,0 4,-4c0,-5 -4,-10 -9,-10z M7.5,11a.9,.9 0 1,0 .01,0 M10,7a.9,.9 0 1,0 .01,0 M14.5,7a.9,.9 0 1,0 .01,0 M17.2,10.5a.9,.9 0 1,0 .01,0"
     const val NOTE = "M9,17.5V6.2l9,-2v11.3 M9,17.5a2.5,2.5 0 1,1 -5,0a2.5,2.5 0 0,1 5,0z M18,15.5a2.5,2.5 0 1,1 -5,0a2.5,2.5 0 0,1 5,0z"
 }
 
@@ -556,13 +557,14 @@ class FileThumbView(ctx: Context) : View(ctx) {
         val h = height.toFloat()
         val d = resources.displayMetrics.density
         if (f.isDirectory) {
-            val fb = Assets.folder
+            val fci = FolderColors.idxOf(f.path)
+            val fb = FolderColors.bitmap(fci)
             val r = fit(fb, w, h, 0.98f, 0.98f)
             canvas.drawBitmap(fb, null, r, bp)
             val g = folderGlyph(f.name)
             if (g != null) {
                 val s = r.height() * 0.34f
-                val ic = Glyph.get(g, 0xB02A78AE.toInt(), true, 1.9f)
+                val ic = Glyph.get(g, FolderColors.glyph(fci), true, 1.9f)
                 val cx = r.centerX()
                 val cy = r.top + r.height() * 0.64f
                 ic.setBounds((cx - s / 2).toInt(), (cy - s / 2).toInt(), (cx + s / 2).toInt(), (cy + s / 2).toInt())
@@ -646,6 +648,11 @@ class IosEditText(ctx: Context) : EditText(ctx) {
         background = null
         typeface = Fonts.regular
         highlightColor = 0x55007AFF
+        addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: Editable?) { if (s != null) Emoji.spanInPlace(s) }
+        })
     }
 
     override fun onFocusChanged(focused: Boolean, direction: Int, previouslyFocusedRect: Rect?) {
@@ -1118,5 +1125,142 @@ class StepSlider(ctx: Context) : View(ctx) {
             }
         }
         return true
+    }
+}
+
+/** Span yang memaksa potongan teks emoji memakai font Apple Color Emoji. */
+class EmojiSpan(private val tf: Typeface) : android.text.style.MetricAffectingSpan() {
+    override fun updateDrawState(p: android.text.TextPaint) { p.typeface = tf }
+    override fun updateMeasureState(p: android.text.TextPaint) { p.typeface = tf }
+}
+
+/**
+ * Emoji selalu memakai Apple Color Emoji bawaan app (aset dari user). Tidak ada opsi untuk menggantinya.
+ * Dipakai di semua teks (nama file/folder, judul) dan kolom ketik (pencarian, ganti nama).
+ */
+object Emoji {
+    val face: Typeface? by lazy {
+        try { Typeface.createFromAsset(Thumbs.ctx.assets, "fonts/AppleColorEmoji.ttf") } catch (e: Throwable) { null }
+    }
+    private val usable: Boolean by lazy {
+        val f = face
+        f != null && Paint().apply { typeface = f }.hasGlyph("\uD83D\uDE00")
+    }
+
+    private val bmpDefault = listOf(
+        0x231A..0x231B, 0x23E9..0x23EC, 0x23F0..0x23F0, 0x23F3..0x23F3, 0x25FD..0x25FE, 0x2614..0x2615,
+        0x2648..0x2653, 0x267F..0x267F, 0x2693..0x2693, 0x26A1..0x26A1, 0x26AA..0x26AB, 0x26BD..0x26BE,
+        0x26C4..0x26C5, 0x26CE..0x26CE, 0x26D4..0x26D4, 0x26EA..0x26EA, 0x26F2..0x26F3, 0x26F5..0x26F5,
+        0x26FA..0x26FA, 0x26FD..0x26FD, 0x2705..0x2705, 0x270A..0x270B, 0x2728..0x2728, 0x274C..0x274C,
+        0x274E..0x274E, 0x2753..0x2755, 0x2757..0x2757, 0x2795..0x2797, 0x27B0..0x27B0, 0x27BF..0x27BF,
+        0x2B1B..0x2B1C, 0x2B50..0x2B50, 0x2B55..0x2B55
+    )
+
+    private fun astral(cp: Int) = cp in 0x1F000..0x1FAFF
+    private fun base(cp: Int) = astral(cp) || bmpDefault.any { cp in it }
+    private fun joiner(cp: Int) = cp == 0x200D || cp == 0xFE0F || cp == 0x20E3 || cp in 0xE0020..0xE007F
+    private fun keycapBase(cp: Int) = cp in 0x30..0x39 || cp == 0x23 || cp == 0x2A
+
+    private fun start(cp: Int, next: Int): Boolean {
+        if (base(cp)) return true
+        if (next == 0x20E3) return keycapBase(cp)
+        if (next == 0xFE0F) {
+            return cp in 0x2190..0x2BFF || cp == 0xA9 || cp == 0xAE || cp == 0x203C || cp == 0x2049 ||
+                cp == 0x2122 || cp == 0x2139 || cp == 0x3030 || cp == 0x303D || cp == 0x3297 || cp == 0x3299 || keycapBase(cp)
+        }
+        return false
+    }
+
+    private fun runs(s: CharSequence): List<Pair<Int, Int>> {
+        val t = s.toString()
+        val n = t.length
+        val out = ArrayList<Pair<Int, Int>>()
+        var i = 0
+        while (i < n) {
+            val cp = t.codePointAt(i)
+            val next = i + Character.charCount(cp)
+            val nextCp = if (next < n) t.codePointAt(next) else -1
+            if (start(cp, nextCp)) {
+                var j = next
+                var prevZwj = false
+                while (j < n) {
+                    val c2 = t.codePointAt(j)
+                    val ok2 = joiner(c2) || base(c2) || (prevZwj && (c2 in 0x2190..0x2BFF))
+                    if (!ok2) break
+                    prevZwj = c2 == 0x200D
+                    j += Character.charCount(c2)
+                }
+                out.add(Pair(i, j))
+                i = j
+            } else i = next
+        }
+        return out
+    }
+
+    fun apply(src: CharSequence?): CharSequence? {
+        if (src == null || src.isEmpty()) return src
+        val r = runs(src)
+        if (r.isEmpty() || !usable) return src
+        val sp = android.text.SpannableString(src)
+        for (x in r) sp.setSpan(EmojiSpan(face!!), x.first, x.second, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        return sp
+    }
+
+    fun spanInPlace(e: Editable) {
+        for (o in e.getSpans(0, e.length, EmojiSpan::class.java)) e.removeSpan(o)
+        if (e.isEmpty()) return
+        val r = runs(e)
+        if (r.isEmpty() || !usable) return
+        for (x in r) e.setSpan(EmojiSpan(face!!), x.first, x.second, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+}
+
+class EmojiTextView(ctx: Context) : android.widget.TextView(ctx) {
+    override fun setText(text: CharSequence?, type: android.widget.TextView.BufferType?) {
+        super.setText(Emoji.apply(text), type)
+    }
+}
+
+/** Warna folder (bisa diganti lewat popup): ubah hue gambar folder biru. */
+object FolderColors {
+    val names = arrayOf("Blue", "Purple", "Pink", "Red", "Orange", "Yellow", "Green", "Gray")
+    val dots = intArrayOf(
+        0xFF32ADE6.toInt(), 0xFFAF52DE.toInt(), 0xFFFF2D87.toInt(), 0xFFFF3B30.toInt(),
+        0xFFFF9500.toInt(), 0xFFFFCC00.toInt(), 0xFF34C759.toInt(), 0xFF8E8E93.toInt()
+    )
+    private val hues = floatArrayOf(205f, 275f, 330f, 355f, 28f, 48f, 135f, -1f)
+    val map = HashMap<String, Int>()
+    private val cache = HashMap<Int, Bitmap>()
+
+    fun idxOf(path: String): Int = map[path] ?: 0
+
+    fun bitmap(idx: Int): Bitmap {
+        if (idx <= 0 || idx >= hues.size) return Assets.folder
+        return cache.getOrPut(idx) { recolor(Assets.folder, hues[idx]) }
+    }
+
+    fun glyph(idx: Int): Int {
+        if (idx <= 0 || idx >= hues.size) return 0xB02A78AE.toInt()
+        val h = hues[idx]
+        return if (h < 0) 0xB0555559.toInt() else Color.HSVToColor(0xB0, floatArrayOf(h, 0.75f, 0.6f))
+    }
+
+    private fun recolor(src: Bitmap, hue: Float): Bitmap {
+        val w = src.width
+        val h = src.height
+        val px = IntArray(w * h)
+        src.getPixels(px, 0, w, 0, 0, w, h)
+        val hsv = FloatArray(3)
+        for (i in px.indices) {
+            val c = px[i]
+            val a = c ushr 24
+            if (a == 0) continue
+            Color.colorToHSV(c, hsv)
+            if (hsv[1] > 0.18f) {
+                if (hue < 0) { hsv[1] *= 0.12f; hsv[2] *= 0.85f } else hsv[0] = hue
+                px[i] = Color.HSVToColor(a, hsv)
+            }
+        }
+        return Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888)
     }
 }

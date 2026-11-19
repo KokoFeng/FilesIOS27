@@ -27,6 +27,7 @@ android {
             signingConfig = signingConfigs.getByName("feng")
         }
     }
+    androidResources { noCompress += listOf("ttf", "otf") }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

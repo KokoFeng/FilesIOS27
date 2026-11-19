@@ -142,7 +142,7 @@ class MainActivity : Activity() {
     fun flp(w: Int, h: Int, g: Int = Gravity.NO_GRAVITY) = FrameLayout.LayoutParams(w, h, g)
     fun llp(w: Int, h: Int, weight: Float = 0f) = LinearLayout.LayoutParams(w, h, weight)
 
-    fun tv(t: String, sp: Float, col: Int, bold: Boolean = false) = TextView(this).apply {
+    fun tv(t: String, sp: Float, col: Int, bold: Boolean = false) = EmojiTextView(this).apply {
         text = t
         textSize = sp * C.textScale
         setTextColor(col)
@@ -184,6 +184,7 @@ class MainActivity : Activity() {
         C.dark = resolveDark()
         C.textScale = floatArrayOf(1f, 1.1f, 1.25f)[prefs.getInt("textscale", 0).coerceIn(0, 2)]
         applyLocalePrefs()
+        for ((k, v) in prefs.all) if (k.startsWith("fc:") && v is Int) FolderColors.map[k.substring(3)] = v
         gridMode = prefs.getBoolean("grid", true)
         sortMode = prefs.getInt("sort", 0)
         applyThemeFlags()
@@ -575,8 +576,12 @@ class MainActivity : Activity() {
         return c
     }
 
-    fun midCut(n: String, max: Int): String =
-        if (n.length <= max) n else n.substring(0, (max * 0.55).toInt()) + "…" + n.substring(n.length - (max * 0.35).toInt())
+    fun midCut(n: String, max: Int): String {
+        if (n.length <= max) return n
+        val a = n.substring(0, (max * 0.55).toInt()).dropLastWhile { Character.isHighSurrogate(it) }
+        val b = n.substring(n.length - (max * 0.35).toInt()).dropWhile { Character.isLowSurrogate(it) }
+        return a + "…" + b
+    }
 
     fun dayStr(ts: Long): String {
         val now = Calendar.getInstance()
@@ -935,7 +940,10 @@ class MainActivity : Activity() {
                     }
                     row.addView(tv(m.label, 17f, col), llp(0, WRAP, 1f))
                     when {
-                        m.dot != 0 -> row.addView(View(this).apply { background = oval(m.dot) }, llp(dpi(16), dpi(16)))
+                        m.dot != 0 -> {
+                            if (m.check) row.addView(icon(P.CHECK, C.TEXT, 18), llp(dpi(18), dpi(18)).apply { marginEnd = dpi(10) })
+                            row.addView(View(this).apply { background = oval(m.dot) }, llp(dpi(16), dpi(16)))
+                        }
                         m.check -> row.addView(icon(P.CHECK, C.TEXT, 18))
                         m.icon != null -> row.addView(icon(m.icon, col, 22))
                     }
@@ -1088,6 +1096,7 @@ class MainActivity : Activity() {
         if (f.isDirectory) items.add(Mi("Open", P.FOLDER) { pushPage(ListPage(f, 0, f.name, true).view) })
         else items.add(Mi("Quick Look", P.EYE) { quickLook(f) })
         items.add(Mi("Tags", P.TAG) { tagMenu(f, x, y) })
+        if (f.isDirectory) items.add(Mi("Folder Color", P.PALETTE) { folderColorMenu(f, x, y) })
         items.add(Mi("Rename", P.PENCIL) { rename(f) })
         items.add(Mi(sep = true))
         if (ext in INSTALLABLE) items.add(Mi("Install", P.DOWNLOAD) { openOther(f) })
@@ -1118,6 +1127,8 @@ class MainActivity : Activity() {
                 if (!f.renameTo(d)) throw Exception("Cannot rename")
                 val t = prefs.getInt("t:" + f.path, 0)
                 if (t != 0) prefs.edit().remove("t:" + f.path).putInt("t:" + d.path, t).apply()
+                val fc = FolderColors.map.remove(f.path)
+                if (fc != null) { FolderColors.map[d.path] = fc; prefs.edit().remove("fc:" + f.path).putInt("fc:" + d.path, fc).apply() }
             }
         }))
     }
@@ -2053,7 +2064,7 @@ class MainActivity : Activity() {
         val o = overlay ?: return
         if (viewerView != null) return
         hideKb()
-        val v = FrameLayout(this).apply { setBackgroundColor(if (dark) C.TEXT else C.BG); isClickable = true }
+        val v = FrameLayout(this).apply { setBackgroundColor(if (dark) 0xFF000000.toInt() else C.BG); isClickable = true }
         build(v)
         val bar = FrameLayout(this).apply {
             setPadding(dpi(12), topInset + dpi(8), dpi(12), dpi(8))
