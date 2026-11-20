@@ -9,3 +9,9 @@ Fitur: Recents / Shared / Browse, grid & list, pencarian + mic, popup tahan-lama
 Rename, Compress (zip), Extract, Install APK, Duplicate, New Folder with Item, Tags warna,
 Copy/Move + Paste, Share, Get Info, Delete. Viewer foto (pinch, double-tap), video, audio, teks (bisa edit & Save).
 Kursor biru iOS bergerak halus (IosEditText). Swipe dari tepi kiri untuk kembali.
+
+## Multi-bahasa (v1.2.0)
+- Bahasa: English, Русский, العربية, 한국어, Bahasa Melayu, Português, Español, Bahasa Indonesia.
+- Otomatis mengikuti bahasa bawaan HP; bahasa HP yang belum tersedia memakai English.
+- Bisa diganti manual di Settings > General > Language.
+- Semua terjemahan ada di `I18n.kt` (teks sumber tetap English, kamus menerjemahkan saat tampil).

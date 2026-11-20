@@ -463,7 +463,7 @@ fun MainActivity.infoRow(label: String, value: String): View {
 }
 
 fun MainActivity.settingsGroup(col: LinearLayout, header: String?, footer: String?, rows: List<View>) {
-    if (header != null) col.addView(tv(header.uppercase(), 13f, C.GRAY).apply { setPadding(dpi(16), dpi(22), 0, dpi(6)) })
+    if (header != null) col.addView(tv(I18n.t(header).uppercase(), 13f, C.GRAY).apply { setPadding(dpi(16), dpi(22), 0, dpi(6)) })
     else col.addView(View(this), llp(MATCH, dpi(22)))
     val card = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
@@ -545,6 +545,7 @@ fun MainActivity.settingsPage(): View {
             switchRow("Haptic Feedback", prefs.getBoolean("haptics", true)) { on -> prefs.edit().putBoolean("haptics", on).apply() }
         ))
         settingsGroup(col, "General", null, listOf(
+            valueRow("Language", if (prefs.getString("lang", null) == null) I18n.t("Automatic") else I18n.nameOf(I18n.lang)) { pushPage(languagePage()) },
             navRow("Run Setup Again", C.TEXT) { prefs.edit().putBoolean("setup_done", false).apply(); showSetup(0) },
             navRow("Restore Defaults", C.RED) {
                 alert("Restore Defaults?", "Appearance, glass, favorites and view options will return to their original values.", null, 0, listOf(
@@ -567,10 +568,10 @@ fun MainActivity.settingsPage(): View {
             val code = if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong()
             "${pi.versionName} ($code)"
         } catch (e: Exception) { "1.0" }
-        settingsGroup(col, "About", "Ikon bawaan dan ikon aplikasi dikunci dan tidak dapat diubah.", listOf(
-            infoRow("Aplikasi", "Files iOS 27"),
-            infoRow("Apps ini dibuat oleh", "Feng-Dev / Feng iOS on Droid"),
-            infoRow("Versi aplikasi", ver)
+        settingsGroup(col, "About", "Default icons and the app icon are locked and cannot be changed.", listOf(
+            infoRow("App", "Files iOS 27"),
+            infoRow("This app was made by", "Feng-Dev / Feng iOS on Droid"),
+            infoRow("App Version", ver)
         ))
     }
     fill()
@@ -613,9 +614,9 @@ fun MainActivity.tamperLock(reason: String) {
         root.setBackgroundColor(Color.BLACK)
         root.translationX = 0f
         alert(
-            "Apps Ini Telah Dimodifikasi",
-            "Apps ini telah dimodifikasi.\n\nKhusus untuk para modder / pemodifikasi: apps ini akan memberontak dan tidak bisa digunakan.\n\nSilakan pasang versi asli dari Feng-Dev / Feng iOS on Droid.",
-            null, 0, listOf(Btn("Keluar", 1) { exitApp() })
+            "This App Has Been Modified",
+            "This app has been modified.\n\nFor modders: this app will rebel and cannot be used.\n\nPlease install the original version from Feng-Dev / Feng iOS on Droid.",
+            null, 0, listOf(Btn("Quit", 1) { exitApp() })
         )
     }, 1500)
 }
@@ -827,7 +828,7 @@ fun MainActivity.startDownload(url: String, dir: File, name: String, knownLen: L
                         if (now - last > 250) {
                             last = now
                             val txt = (if (total > 0) "Downloading ${got * 100 / total}%" else "Downloading ${FileOps.size(got)}") + " · tap to cancel"
-                            ui.post { pill.text = txt }
+                            ui.post { pill.text = I18n.t(txt) }
                         }
                     }
                 }

@@ -38,13 +38,23 @@ val COUNTRIES = listOf(
     "RU", "TR", "SA", "AE", "SG", "MY", "TH", "VN", "PH", "NL", "SE", "PL", "UA", "NG", "ZA"
 )
 
-fun countryName(cc: String): String = Locale("", cc).getDisplayCountry(Locale.ENGLISH)
+fun countryName(cc: String): String = Locale("", cc).getDisplayCountry(Locale.getDefault())
 
 /** Teks setup dalam English atau Bahasa Indonesia (bahasa lain memakai English). */
-fun MainActivity.tr(en: String, id: String): String = if (prefs.getString("lang", "en") == "id") id else en
+fun MainActivity.tr(en: String, id: String): String = if (I18n.lang == "id") id else I18n.t(en)
 
 fun MainActivity.applyLocalePrefs() {
-    val lang = prefs.getString("lang", null) ?: return
+    val saved = prefs.getString("lang", null)
+    I18n.lang = I18n.resolve(saved)
+    if (saved == null) {
+        // Otomatis: ikuti bahasa bawaan HP
+        try {
+            Locale.setDefault(I18n.sysLocale)
+            df = SimpleDateFormat("M/d/yy", I18n.sysLocale)
+        } catch (e: Exception) {}
+        return
+    }
+    val lang = saved
     val tag = when (lang) { "zhs" -> "zh-CN"; "zht" -> "zh-TW"; "no" -> "nb"; else -> lang }
     val cc = prefs.getString("region", "") ?: ""
     try {
@@ -108,6 +118,7 @@ fun MainActivity.setupLanguage(): View {
         l.name to {
             prefs.edit().putString("lang", l.code).apply()
             applyLocalePrefs()
+            applyDirection()
             showSetup(1)
         }
     }), llp(MATCH, WRAP))
@@ -195,7 +206,7 @@ fun MainActivity.setupQuickStart(): View {
         setImageResource(R.drawable.setup_quick)
         scaleType = ImageView.ScaleType.FIT_XY
     }, flp(sw, sw, Gravity.TOP))
-    val code = prefs.getString("lang", "en") ?: "en"
+    val code = prefs.getString("lang", null) ?: I18n.lang
     val rid = resources.getIdentifier("hello_$code", "drawable", packageName)
     if (rid != 0) {
         val hw = (sw * 0.164f).toInt()
@@ -310,7 +321,7 @@ fun MainActivity.finishSetup() {
     prefs.edit().putBoolean("setup_done", true).apply()
     root.removeAllViews()
     root.setBackgroundColor(C.BG)
-    val code = prefs.getString("lang", "en") ?: "en"
+    val code = prefs.getString("lang", null) ?: I18n.lang
     val rid = resources.getIdentifier("hello_$code", "drawable", packageName)
     val go = { if (hasAccess()) buildMain() else showPermission() }
     if (rid == 0) { go(); return }

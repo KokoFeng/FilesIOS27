@@ -142,8 +142,8 @@ class MainActivity : Activity() {
     fun flp(w: Int, h: Int, g: Int = Gravity.NO_GRAVITY) = FrameLayout.LayoutParams(w, h, g)
     fun llp(w: Int, h: Int, weight: Float = 0f) = LinearLayout.LayoutParams(w, h, weight)
 
-    fun tv(t: String, sp: Float, col: Int, bold: Boolean = false) = EmojiTextView(this).apply {
-        text = t
+    fun tv(t: String, sp: Float, col: Int, bold: Boolean = false, raw: Boolean = false) = EmojiTextView(this).apply {
+        text = if (raw) t else I18n.t(t)
         textSize = sp * C.textScale
         setTextColor(col)
         typeface = if (bold) (if (sp >= 24f) Fonts.display else Fonts.semibold) else Fonts.regular
@@ -183,6 +183,7 @@ class MainActivity : Activity() {
         window.navigationBarColor = Color.TRANSPARENT
         C.dark = resolveDark()
         C.textScale = floatArrayOf(1f, 1.1f, 1.25f)[prefs.getInt("textscale", 0).coerceIn(0, 2)]
+        I18n.sysLocale = I18n.systemLocaleNow()
         applyLocalePrefs()
         for ((k, v) in prefs.all) if (k.startsWith("fc:") && v is Int) FolderColors.map[k.substring(3)] = v
         gridMode = prefs.getBoolean("grid", true)
@@ -190,6 +191,7 @@ class MainActivity : Activity() {
         applyThemeFlags()
         root = FrameLayout(this).apply { setBackgroundColor(C.BG) }
         setContentView(root)
+        applyDirection()
         root.setOnApplyWindowInsetsListener { _, i ->
             topInset = i.systemWindowInsetTop
             val bt = i.systemWindowInsetBottom
@@ -621,7 +623,7 @@ class MainActivity : Activity() {
         val t = tagOf(f)
         h.dot.visibility = if (t != 0) View.VISIBLE else View.GONE
         if (t != 0) h.dot.background = oval(t)
-        h.sub.text = subText(f, g, kind)
+        h.sub.text = I18n.t(subText(f, g, kind))
     }
 
     inner class ListPage(val dir: File?, val kind: Int, val title: String, val back: Boolean, val focusSearch: Boolean = false, val tagColor: Int = 0) {
@@ -661,13 +663,13 @@ class MainActivity : Activity() {
             val head = FrameLayout(ctx).apply { setPadding(dpi(12), topInset + dpi(8), dpi(12), dpi(6)) }
             if (back) {
                 head.addView(circle(P.BACK, false) { popPage() }, flp(dpi(40), dpi(40), Gravity.START))
-                titleTv = tv(title, 17f, C.TEXT, true).apply {
+                titleTv = tv(title, 17f, C.TEXT, true, dir != null && title == dir.name).apply {
                     maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; maxWidth = dpi(200)
                 }
                 head.addView(titleTv, flp(WRAP, dpi(40), Gravity.CENTER_HORIZONTAL))
             } else {
                 head.minimumHeight = topInset + dpi(64)
-                titleTv = tv(title, 34f, C.TEXT, true).apply { setPadding(dpi(6), 0, 0, 0) }
+                titleTv = tv(title, 34f, C.TEXT, true, dir != null && title == dir.name).apply { setPadding(dpi(6), 0, 0, 0) }
                 head.addView(titleTv, flp(WRAP, WRAP, Gravity.START or Gravity.CENTER_VERTICAL))
             }
             val mg = Gravity.END or (if (back) Gravity.NO_GRAVITY else Gravity.CENTER_VERTICAL)
@@ -694,7 +696,7 @@ class MainActivity : Activity() {
             clearBtn.setOnClickListener { search.setText("") }
             val pending = Runnable { query = search.text.toString().trim(); applyQuery() }
             search.apply {
-                hint = "Search"
+                hint = I18n.t("Search")
                 textSize = 17f
                 setSingleLine()
                 setTextColor(C.TEXT)
@@ -769,7 +771,7 @@ class MainActivity : Activity() {
         }
 
         fun updateSelUi() {
-            titleTv.text = if (selecting) (if (selected.isEmpty()) "Select Items" else "${selected.size} Selected") else title
+            titleTv.text = if (selecting) I18n.t(if (selected.isEmpty()) "Select Items" else "${selected.size} Selected") else (if (dir != null && title == dir.name) title else I18n.t(title))
             moreBtn.visibility = if (selecting) View.GONE else View.VISIBLE
             doneBtn.visibility = if (selecting) View.VISIBLE else View.GONE
             onSelChanged?.invoke()
@@ -847,7 +849,7 @@ class MainActivity : Activity() {
         if (pg.kind == 0) {
             items.add(Mi("Download from URL", P.DOWNLOAD) { askUrl(pg.dir!!) })
             items.add(Mi("New Folder", P.NEWFOLDER) {
-                alert("New Folder", null, "untitled folder", 14, listOf(Btn("Cancel"), Btn("Done", 1) { n ->
+                alert("New Folder", null, I18n.t("untitled folder"), I18n.t("untitled folder").length - 1, listOf(Btn("Cancel"), Btn("Done", 1) { n ->
                     val nn = n.trim()
                     if (nn.isNotEmpty()) bg("Folder created") {
                         val d = File(pg.dir, nn)
@@ -1200,7 +1202,7 @@ class MainActivity : Activity() {
         }
         sv.addView(col)
         col.addView(FileThumbView(this).also { it.bind(f) }, llp(MATCH, dpi(190)))
-        col.addView(tv(f.name, 22f, C.TEXT, true).apply { setPadding(0, dpi(16), 0, dpi(2)) })
+        col.addView(tv(f.name, 22f, C.TEXT, true, true).apply { setPadding(0, dpi(16), 0, dpi(2)) })
         col.addView(tv(FileOps.kind(f) + " - " + FileOps.size(sz), 15f, C.GRAY))
         if (!f.isDirectory) col.addView(tv("OPEN", 15f, Color.WHITE, true).apply {
             gravity = Gravity.CENTER
@@ -1225,7 +1227,7 @@ class MainActivity : Activity() {
             box.addView(r)
             return box
         }
-        val dfm = SimpleDateFormat("d MMMM yyyy 'at' HH:mm", Locale.getDefault())
+        val dfm = SimpleDateFormat(I18n.dt("d MMMM yyyy 'at' HH:mm"), Locale.getDefault())
         val where = locationOf(f)
         val base = when (where) {
             "iCloud Drive" -> icloudDir
@@ -1246,7 +1248,7 @@ class MainActivity : Activity() {
         more.setOnClickListener {
             val open = extra.visibility == View.VISIBLE
             extra.visibility = if (open) View.GONE else View.VISIBLE
-            more.text = if (open) "Show More" else "Show Less"
+            more.text = I18n.t(if (open) "Show More" else "Show Less")
         }
 
         col.addView(hairline(), llp(MATCH, 1).apply { topMargin = dpi(20) })
@@ -1395,7 +1397,7 @@ class MainActivity : Activity() {
         }
         head.addView(FileThumbView(this).also { it.bind(f) }, llp(dpi(40), dpi(48)))
         val hc = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        hc.addView(tv(f.name, 17f, C.TEXT, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.MIDDLE })
+        hc.addView(tv(f.name, 17f, C.TEXT, true, true).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.MIDDLE })
         hc.addView(tv(FileOps.kind(f) + " · " + sizeLocal(f.length()), 15f, C.GRAY))
         head.addView(hc, llp(0, WRAP, 1f).apply { marginStart = dpi(12); marginEnd = dpi(8) })
         head.addView(FrameLayout(this).apply {
@@ -1645,7 +1647,7 @@ class MainActivity : Activity() {
     }
 
     fun customInstall(d: File) {
-        val ts = SimpleDateFormat("d MMM yyyy 'at' HH:mm:ss", Locale.getDefault()).format(Date(d.lastModified()))
+        val ts = SimpleDateFormat(I18n.dt("d MMM yyyy 'at' HH:mm:ss"), Locale.getDefault()).format(Date(d.lastModified()))
         val sz = String.format(Locale.US, "%.2fMB", d.length() / 1048576.0)
         actionSheet(d.name, "$ts  $sz", listOf(
             Btn("signature") { showSignature(d) },
@@ -1684,7 +1686,7 @@ class MainActivity : Activity() {
         if (sigs == null || sigs.isEmpty()) return "${pi.packageName}\nUnsigned"
         val sha = java.security.MessageDigest.getInstance("SHA-256").digest(sigs[0].toByteArray())
             .joinToString("") { "%02x".format(it) }.take(32)
-        return "${pi.packageName}\nVersion ${pi.versionName}\nSigned\nSHA-256 $sha…"
+        return "${pi.packageName}\n${I18n.t("Version")} ${pi.versionName}\n${I18n.t("Signed")}\nSHA-256 $sha…"
     }
 
     fun showSignature(d: File) {
