@@ -523,6 +523,12 @@ fun MainActivity.settingsPage(): View {
                     }
                 })
             },
+            valueRow("Menu Style", if (prefs.getInt("menuStyle", 0) == 1) "Liquid Glass iOS 27" else "iOS Blur") {
+                actionSheet("Menu Style", "Choose the look of popup menus.", listOf(
+                    Btn("iOS Blur") { prefs.edit().putInt("menuStyle", 0).apply(); applyTheme(true) },
+                    Btn("Liquid Glass iOS 27") { prefs.edit().putInt("menuStyle", 1).apply(); applyTheme(true) }
+                ))
+            },
             switchRow("Reduce Transparency", prefs.getBoolean("reduce", false)) { on ->
                 prefs.edit().putBoolean("reduce", on).apply()
                 rebuildBar()

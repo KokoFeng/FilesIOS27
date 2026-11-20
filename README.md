@@ -15,3 +15,9 @@ Kursor biru iOS bergerak halus (IosEditText). Swipe dari tepi kiri untuk kembali
 - Otomatis mengikuti bahasa bawaan HP; bahasa HP yang belum tersedia memakai English.
 - Bisa diganti manual di Settings > General > Language.
 - Semua terjemahan ada di `I18n.kt` (teks sumber tetap English, kamus menerjemahkan saat tampil).
+
+## v1.3.0
+- Header halaman folder: tombol pil panah mundur/maju + tombol •••.
+- Emoji iOS atau ikon aplikasi di tengah gambar folder (tahan folder > Folder Icon).
+- Menu Style di Settings > Appearance: iOS Blur / Liquid Glass iOS 27 (latar redup + blur).
+- Tampilan daftar berisi: folder bisa dibuka (panah biru), isi menjorok, titik tag di kanan.

@@ -561,7 +561,27 @@ class FileThumbView(ctx: Context) : View(ctx) {
             val fb = FolderColors.bitmap(fci)
             val r = fit(fb, w, h, 0.98f, 0.98f)
             canvas.drawBitmap(fb, null, r, bp)
-            val g = folderGlyph(f.name)
+            val bd = FolderBadges.map[f.path]
+            val g = if (bd != null) null else folderGlyph(f.name)
+            if (bd != null) {
+                val cx = r.centerX()
+                val cy = r.top + r.height() * 0.64f
+                if (bd.startsWith("e:")) {
+                    val s = r.height() * 0.40f
+                    val ep = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; textSize = s; typeface = Emoji.face ?: Typeface.DEFAULT }
+                    canvas.drawText(bd.substring(2), cx, cy + s * 0.34f, ep)
+                } else {
+                    val ib = FolderBadges.appIcon(bd.substring(2))
+                    if (ib != null) {
+                        val s = r.height() * 0.42f
+                        val dst = RectF(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2)
+                        canvas.save()
+                        canvas.clipPath(Path().apply { addRoundRect(dst, s * 0.22f, s * 0.22f, Path.Direction.CW) })
+                        canvas.drawBitmap(ib, null, dst, bp)
+                        canvas.restore()
+                    }
+                }
+            }
             if (g != null) {
                 val s = r.height() * 0.34f
                 val ic = Glyph.get(g, FolderColors.glyph(fci), true, 1.9f)

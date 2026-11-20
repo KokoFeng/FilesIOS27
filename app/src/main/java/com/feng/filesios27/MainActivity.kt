@@ -82,7 +82,7 @@ class Mi(
 
 class Btn(val label: String, val style: Int = 0, val action: (String) -> Unit = {})
 
-class H(val thumb: FileThumbView, val name: TextView, val sub: TextView, val dot: View)
+class H(val thumb: FileThumbView, val name: TextView, val sub: TextView, val dot: View, val arrow: View? = null)
 
 interface Pl {
     fun playing(): Boolean
@@ -104,6 +104,7 @@ class MainActivity : Activity() {
     var botInset = 0
     var started = false
     val stack = ArrayList<View>()
+    val fwd = ArrayList<View>()
     var tab = 2
     var clip: Pair<List<File>, Boolean>? = null
     var sortMode = 0
@@ -186,6 +187,7 @@ class MainActivity : Activity() {
         I18n.sysLocale = I18n.systemLocaleNow()
         applyLocalePrefs()
         for ((k, v) in prefs.all) if (k.startsWith("fc:") && v is Int) FolderColors.map[k.substring(3)] = v
+        for ((k, v) in prefs.all) if (k.startsWith("fb:") && v is String) FolderBadges.map[k.substring(3)] = v
         gridMode = prefs.getBoolean("grid", true)
         sortMode = prefs.getInt("sort", 0)
         applyThemeFlags()
@@ -456,17 +458,28 @@ class MainActivity : Activity() {
         updateBar()
     }
 
-    fun pushPage(v: View) {
+    fun goForward() {
+        if (fwd.isEmpty()) return
+        pushPage(fwd.removeAt(fwd.size - 1), true)
+    }
+
+    fun refreshNavAll() { stack.forEach { (it.tag as? ListPage)?.refreshNav() } }
+
+    fun pushPage(v: View, keepFwd: Boolean = false) {
         kickGlass(700)
         val pg = pages ?: return
+        if (!keepFwd) fwd.clear()
         val w = root.width.toFloat()
         val prev = stack.last()
         v.elevation = dp(8f)
+        v.animate().cancel()
+        (v.parent as? ViewGroup)?.removeView(v)
         pg.addView(v, MATCH, MATCH)
         v.translationX = w
         v.animate().translationX(0f).setDuration(380).setInterpolator(IOS_EASE).start()
         prev.animate().translationX(-w * 0.3f).setDuration(380).setInterpolator(IOS_EASE).start()
         stack.add(v)
+        refreshNavAll()
     }
 
     fun popPage() {
@@ -476,9 +489,11 @@ class MainActivity : Activity() {
         hideKb()
         val w = root.width.toFloat()
         val v = stack.removeAt(stack.size - 1)
+        if (v.tag is ListPage) fwd.add(v)
         val prev = stack.last()
-        v.animate().translationX(w).setDuration(300).setInterpolator(IOS_EASE).withEndAction { pages?.removeView(v) }.start()
+        v.animate().translationX(w).setDuration(300).setInterpolator(IOS_EASE).withEndAction { if (!stack.contains(v)) pages?.removeView(v) }.start()
         prev.animate().translationX(0f).setDuration(300).setInterpolator(IOS_EASE).start()
+        refreshNavAll()
     }
 
     fun popToRoot() {
@@ -544,15 +559,16 @@ class MainActivity : Activity() {
     fun makeCell(g: Boolean): LinearLayout {
         val c = LinearLayout(this).apply { background = pressBg() }
         val thumb = FileThumbView(this)
-        val name = tv("", if (g) 14f else 16f, C.TEXT)
+        val name = tv("", if (g) 14f else 17f, C.TEXT)
         val sub = tv("", if (g) 12f else 13f, C.GRAY)
         val dot = View(this)
         name.maxLines = 2
         name.ellipsize = TextUtils.TruncateAt.END
         sub.maxLines = if (g) 2 else 1
         val nr = LinearLayout(this).apply { gravity = if (g) Gravity.CENTER else Gravity.CENTER_VERTICAL }
-        nr.addView(dot, llp(dpi(8), dpi(8)).apply { marginEnd = dpi(4) })
+        var arrow: View? = null
         if (g) {
+            nr.addView(dot, llp(dpi(8), dpi(8)).apply { marginEnd = dpi(4) })
             name.gravity = Gravity.CENTER
             sub.gravity = Gravity.CENTER
             nr.addView(name, llp(WRAP, WRAP))
@@ -566,15 +582,18 @@ class MainActivity : Activity() {
             nr.addView(name, llp(WRAP, WRAP))
             c.orientation = LinearLayout.HORIZONTAL
             c.gravity = Gravity.CENTER_VERTICAL
-            c.setPadding(dpi(16), dpi(8), dpi(16), dpi(8))
+            c.setPadding(dpi(12), dpi(8), dpi(16), dpi(8))
             c.minimumHeight = dpi(64)
+            arrow = icon(P.CHEV, 0xFF0A84FF.toInt(), 14).apply { setPadding(dpi(6), dpi(10), dpi(6), dpi(10)) }
+            c.addView(arrow, llp(dpi(26), dpi(34)))
             c.addView(thumb, llp(dpi(44), dpi(44)))
             val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             col.addView(nr)
             col.addView(sub)
-            c.addView(col, llp(0, WRAP, 1f).apply { marginStart = dpi(14) })
+            c.addView(col, llp(0, WRAP, 1f).apply { marginStart = dpi(12) })
+            c.addView(dot, llp(dpi(10), dpi(10)).apply { marginStart = dpi(8) })
         }
-        c.tag = H(thumb, name, sub, dot)
+        c.tag = H(thumb, name, sub, dot, arrow)
         return c
     }
 
@@ -615,8 +634,23 @@ class MainActivity : Activity() {
         return df.format(Date(f.lastModified())) + sep + FileOps.size(f.length())
     }
 
-    fun bindCell(c: View, f: File, g: Boolean, kind: Int, sel: Int = 0) {
+    fun bindCell(c: View, f: File, g: Boolean, kind: Int, sel: Int = 0, depth: Int = 0, expandable: Boolean = false, expanded: Boolean = false, onArrow: (() -> Unit)? = null) {
         val h = c.tag as H
+        if (!g) {
+            c.setPadding(dpi(12) + depth * dpi(28), dpi(8), dpi(16), dpi(8))
+            val a = h.arrow
+            if (a != null) {
+                if (expandable && f.isDirectory) {
+                    a.visibility = View.VISIBLE
+                    a.rotation = if (expanded) 90f else 0f
+                    a.setOnClickListener { onArrow?.invoke() }
+                } else {
+                    a.visibility = if (expandable) View.INVISIBLE else View.GONE
+                    a.setOnClickListener(null)
+                    a.isClickable = false
+                }
+            }
+        }
         h.thumb.selState = sel
         h.thumb.bind(f)
         h.name.text = if (g) midCut(f.name, 28) else f.name
@@ -635,6 +669,9 @@ class MainActivity : Activity() {
         lateinit var moreBtn: View
         lateinit var doneBtn: View
         var items: List<File> = emptyList()
+        var rows: List<Pair<File, Int>> = emptyList()
+        val expanded = HashSet<String>()
+        var navFwd: View? = null
         var base: List<File> = emptyList()
         var query = ""
         var searchJob = 0
@@ -646,12 +683,14 @@ class MainActivity : Activity() {
         val search = IosEditText(ctx)
 
         inner class A(val g: Boolean) : BaseAdapter() {
-            override fun getCount() = items.size
-            override fun getItem(p: Int): Any = items[p]
+            override fun getCount() = if (g) items.size else rows.size
+            override fun getItem(p: Int): Any = if (g) items[p] else rows[p].first
             override fun getItemId(p: Int) = p.toLong()
             override fun getView(p: Int, cv: View?, parent: ViewGroup?): View {
                 val row = cv ?: makeCell(g)
-                bindCell(row, items[p], g, kind, selState(items[p]))
+                val f = if (g) items[p] else rows[p].first
+                val depth = if (g) 0 else rows[p].second
+                bindCell(row, f, g, kind, selState(f), depth, !g && kind == 0 && query.isBlank(), expanded.contains(f.path)) { toggleExpand(f) }
                 return row
             }
         }
@@ -662,9 +701,28 @@ class MainActivity : Activity() {
             view.tag = this
             val head = FrameLayout(ctx).apply { setPadding(dpi(12), topInset + dpi(8), dpi(12), dpi(6)) }
             if (back) {
-                head.addView(circle(P.BACK, false) { popPage() }, flp(dpi(40), dpi(40), Gravity.START))
+                val nav = LinearLayout(ctx).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    background = GlassDrawable(dp(20f), 0xD9FFFFFF.toInt(), 0xA6FFFFFF.toInt())
+                    elevation = dp(2f)
+                }
+                val nb = FrameLayout(ctx).apply {
+                    pressFx(this)
+                    addView(icon(P.BACK, C.TEXT, 20), flp(dpi(20), dpi(20), Gravity.CENTER))
+                    setOnClickListener { popPage() }
+                }
+                val nf = FrameLayout(ctx).apply {
+                    addView(icon(P.CHEV, C.TEXT, 20), flp(dpi(20), dpi(20), Gravity.CENTER))
+                    setOnClickListener { goForward() }
+                    alpha = 0.35f
+                }
+                navFwd = nf
+                nav.addView(nb, llp(dpi(48), dpi(40)))
+                nav.addView(nf, llp(dpi(48), dpi(40)))
+                head.addView(nav, flp(dpi(96), dpi(40), Gravity.START))
                 titleTv = tv(title, 17f, C.TEXT, true, dir != null && title == dir.name).apply {
-                    maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER; maxWidth = dpi(200)
+                    maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER
+                    maxWidth = (root.width - dpi(240)).coerceAtLeast(dpi(90))
                 }
                 head.addView(titleTv, flp(WRAP, dpi(40), Gravity.CENTER_HORIZONTAL))
             } else {
@@ -728,13 +786,14 @@ class MainActivity : Activity() {
 
             val content = FrameLayout(ctx)
             list.apply {
-                divider = null
+                divider = android.graphics.drawable.InsetDrawable(ColorDrawable(C.SEP), dpi(74), 0, 0, 0)
+                dividerHeight = 1
                 selector = ColorDrawable(0)
                 clipToPadding = false
                 setPadding(0, 0, 0, botInset + dpi(110))
                 adapter = la
-                setOnItemClickListener { _, _, pos, _ -> onItem(items[pos]) }
-                setOnItemLongClickListener { _, v, pos, _ -> if (selecting) toggleSel(items[pos]) else { haptic(); contextMenu(items[pos], v, kind) }; true }
+                setOnItemClickListener { _, _, pos, _ -> if (pos < rows.size) onItem(rows[pos].first) }
+                setOnItemLongClickListener { _, v, pos, _ -> if (pos < rows.size) { val ff = rows[pos].first; if (selecting) toggleSel(ff) else { haptic(); contextMenu(ff, v, kind) } }; true }
             }
             grid.apply {
                 numColumns = (root.width / dpi(115)).coerceAtLeast(3)
@@ -755,11 +814,36 @@ class MainActivity : Activity() {
             applyMode()
             reload()
             if (focusSearch) search.postDelayed({ focusField() }, 450)
+            refreshNav()
         }
 
         fun focusField() {
             search.requestFocusFromTouch()
             (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(search, InputMethodManager.SHOW_IMPLICIT)
+        }
+
+        fun refreshNav() {
+            navFwd?.alpha = if (fwd.isNotEmpty() && stack.lastOrNull() === view) 1f else 0.35f
+        }
+
+        fun flatten(): List<Pair<File, Int>> {
+            val out = ArrayList<Pair<File, Int>>()
+            val canExp = kind == 0 && query.isBlank()
+            fun add(f: File, d: Int) {
+                out.add(Pair(f, d))
+                if (canExp && d < 6 && f.isDirectory && expanded.contains(f.path)) {
+                    val kids = try { sortFiles(FileOps.list(f)) } catch (e: Exception) { emptyList() }
+                    for (k in kids) add(k, d + 1)
+                }
+            }
+            for (f in items) add(f, 0)
+            return out
+        }
+
+        fun toggleExpand(f: File) {
+            if (!expanded.remove(f.path)) expanded.add(f.path)
+            rows = flatten()
+            la.notifyDataSetChanged()
         }
 
         fun selState(f: File): Int = if (!selecting) 0 else if (selected.contains(f)) 2 else 1
@@ -828,6 +912,7 @@ class MainActivity : Activity() {
         fun refresh() {
             applyMode()
             kickGlass(400)
+            rows = flatten()
             la.notifyDataSetChanged()
             ga.notifyDataSetChanged()
             empty.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
@@ -881,10 +966,16 @@ class MainActivity : Activity() {
         val o = overlay ?: return
         hideKb()
         val w = dpi(270)
-        val dim = View(this).apply { setBackgroundColor(0x33000000); alpha = 0f; isClickable = true }
+        val liquid = prefs.getInt("menuStyle", 0) == 1
+        var liq: LiquidMenuDrawable? = null
+        var spin: ValueAnimator? = null
+        var blurAnim: ValueAnimator? = null
+        val dim = View(this).apply { setBackgroundColor(if (liquid) 0x2E000000 else 0x33000000); alpha = 0f; isClickable = true }
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = GlassDrawable(dp(22f), 0xE8F6F6F8.toInt(), 0xDCF0F0F3.toInt())
+            background = if (liquid) LiquidMenuDrawable(dp(26f), resources.displayMetrics.density).also { liq = it }
+            else GlassDrawable(dp(22f), 0xE8F6F6F8.toInt(), 0xDCF0F0F3.toInt())
+            if (liquid) setPadding(0, dpi(4), 0, dpi(6))
             clipToOutline = true
             elevation = dp(20f)
         }
@@ -893,6 +984,9 @@ class MainActivity : Activity() {
         fun dismiss(after: (() -> Unit)?) {
             if (gone) return
             gone = true
+            spin?.cancel()
+            blurAnim?.cancel()
+            if (Build.VERSION.SDK_INT >= 31) pages?.setRenderEffect(null)
             dim.animate().alpha(0f).setDuration(140).start()
             pv?.animate()?.alpha(0f)?.setDuration(140)?.start()
             card.animate().alpha(0f).scaleX(0.9f).scaleY(0.9f).setDuration(140).withEndAction {
@@ -918,13 +1012,15 @@ class MainActivity : Activity() {
                 r.addView(cell, llp(0, WRAP, 1f))
             }
             card.addView(r)
-            card.addView(hairline(), llp(MATCH, 1))
+            if (liquid) card.addView(View(this).apply { setBackgroundColor(0x22000000) }, llp(MATCH, dpi(1)).apply { setMargins(dpi(16), dpi(2), dpi(16), dpi(4)) })
+            else card.addView(hairline(), llp(MATCH, 1))
         }
         var prevRow = false
         for (m in items) {
             when {
                 m.sep -> {
-                    card.addView(View(this).apply { setBackgroundColor(C.SEP2) }, llp(MATCH, dpi(8)))
+                    if (liquid) card.addView(View(this).apply { setBackgroundColor(0x22000000) }, llp(MATCH, dpi(1)).apply { setMargins(dpi(16), dpi(4), dpi(16), dpi(4)) })
+                    else card.addView(View(this).apply { setBackgroundColor(C.SEP2) }, llp(MATCH, dpi(8)))
                     prevRow = false
                 }
                 m.header -> {
@@ -932,7 +1028,7 @@ class MainActivity : Activity() {
                     prevRow = false
                 }
                 else -> {
-                    if (prevRow) card.addView(hairline(), llp(MATCH, 1))
+                    if (prevRow && !liquid) card.addView(hairline(), llp(MATCH, 1))
                     val col = if (m.destructive) C.RED else C.TEXT
                     val row = LinearLayout(this).apply {
                         gravity = Gravity.CENTER_VERTICAL
@@ -940,8 +1036,15 @@ class MainActivity : Activity() {
                         background = pressBg()
                         setOnClickListener { dismiss { m.action() } }
                     }
+                    if (liquid && m.dot == 0) {
+                        // Liquid Glass: ikon / centang di kiri, label di kanannya
+                        if (m.icon != null) row.addView(icon(m.icon, col, 22), llp(dpi(22), dpi(22)).apply { marginEnd = dpi(14) })
+                        else if (m.check) row.addView(icon(P.CHECK, C.TEXT, 20), llp(dpi(22), dpi(22)).apply { marginEnd = dpi(14) })
+                        else row.addView(View(this), llp(dpi(22), dpi(22)).apply { marginEnd = dpi(14) })
+                    }
                     row.addView(tv(m.label, 17f, col), llp(0, WRAP, 1f))
                     when {
+                        liquid && m.dot == 0 -> if (m.check && m.icon != null) row.addView(icon(P.CHECK, C.TEXT, 18))
                         m.dot != 0 -> {
                             if (m.check) row.addView(icon(P.CHECK, C.TEXT, 18), llp(dpi(18), dpi(18)).apply { marginEnd = dpi(10) })
                             row.addView(View(this).apply { background = oval(m.dot) }, llp(dpi(16), dpi(16)))
@@ -984,6 +1087,23 @@ class MainActivity : Activity() {
         card.alpha = 0f
         dim.animate().alpha(1f).setDuration(200).start()
         card.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(300).setInterpolator(OvershootInterpolator(1.1f)).start()
+        if (Build.VERSION.SDK_INT >= 31) {
+            val target = if (liquid) 20f else 12f
+            blurAnim = ValueAnimator.ofFloat(0.5f, target).apply {
+                duration = 220
+                addUpdateListener { pages?.setRenderEffect(RenderEffect.createBlurEffect(it.animatedValue as Float, it.animatedValue as Float, Shader.TileMode.CLAMP)) }
+                start()
+            }
+        }
+        if (liquid) {
+            spin = ValueAnimator.ofFloat(0f, 6.2832f).apply {
+                duration = 9000
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = android.view.animation.LinearInterpolator()
+                addUpdateListener { liq?.phase = it.animatedValue as Float; card.invalidate() }
+                start()
+            }
+        }
     }
 
     // ---------- iOS alert ----------
@@ -1099,6 +1219,7 @@ class MainActivity : Activity() {
         else items.add(Mi("Quick Look", P.EYE) { quickLook(f) })
         items.add(Mi("Tags", P.TAG) { tagMenu(f, x, y) })
         if (f.isDirectory) items.add(Mi("Folder Color", P.PALETTE) { folderColorMenu(f, x, y) })
+        if (f.isDirectory) items.add(Mi("Folder Icon", P.FOLDER) { pushPage(badgePage(f)) })
         items.add(Mi("Rename", P.PENCIL) { rename(f) })
         items.add(Mi(sep = true))
         if (ext in INSTALLABLE) items.add(Mi("Install", P.DOWNLOAD) { openOther(f) })
@@ -1129,6 +1250,8 @@ class MainActivity : Activity() {
                 if (!f.renameTo(d)) throw Exception("Cannot rename")
                 val t = prefs.getInt("t:" + f.path, 0)
                 if (t != 0) prefs.edit().remove("t:" + f.path).putInt("t:" + d.path, t).apply()
+                val fbd = FolderBadges.map.remove(f.path)
+                if (fbd != null) { FolderBadges.map[d.path] = fbd; prefs.edit().remove("fb:" + f.path).putString("fb:" + d.path, fbd).apply() }
                 val fc = FolderColors.map.remove(f.path)
                 if (fc != null) { FolderColors.map[d.path] = fc; prefs.edit().remove("fc:" + f.path).putInt("fc:" + d.path, fc).apply() }
             }
