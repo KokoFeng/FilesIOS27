@@ -965,15 +965,15 @@ class MainActivity : Activity() {
     fun showMenu(ax: Float, ay: Float, top: List<Mi>?, items: List<Mi>, preview: File? = null) {
         val o = overlay ?: return
         hideKb()
-        val w = dpi(270)
         val liquid = prefs.getInt("menuStyle", 0) == 1
+        val w = if (liquid) minOf(dpi(250), (root.width * 0.72f).toInt()) else dpi(270)
         var liq: LiquidMenuDrawable? = null
         var spin: ValueAnimator? = null
         var blurAnim: ValueAnimator? = null
-        val dim = View(this).apply { setBackgroundColor(if (liquid) 0x2E000000 else 0x33000000); alpha = 0f; isClickable = true }
+        val dim = View(this).apply { setBackgroundColor(if (liquid) (if (C.dark) 0x47000000 else 0x2E000000) else 0x33000000); alpha = 0f; isClickable = true }
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = if (liquid) LiquidMenuDrawable(dp(26f), resources.displayMetrics.density).also { liq = it }
+            background = if (liquid) LiquidMenuDrawable(dp(26f), resources.displayMetrics.density, C.dark).also { liq = it }
             else GlassDrawable(dp(22f), 0xE8F6F6F8.toInt(), 0xDCF0F0F3.toInt())
             if (liquid) setPadding(0, dpi(4), 0, dpi(6))
             clipToOutline = true
@@ -1012,14 +1012,14 @@ class MainActivity : Activity() {
                 r.addView(cell, llp(0, WRAP, 1f))
             }
             card.addView(r)
-            if (liquid) card.addView(View(this).apply { setBackgroundColor(0x22000000) }, llp(MATCH, dpi(1)).apply { setMargins(dpi(16), dpi(2), dpi(16), dpi(4)) })
+            if (liquid) card.addView(View(this).apply { setBackgroundColor(if (C.dark) 0x40FFFFFF else 0x22000000) }, llp(MATCH, dpi(1)).apply { setMargins(dpi(16), dpi(2), dpi(16), dpi(4)) })
             else card.addView(hairline(), llp(MATCH, 1))
         }
         var prevRow = false
         for (m in items) {
             when {
                 m.sep -> {
-                    if (liquid) card.addView(View(this).apply { setBackgroundColor(0x22000000) }, llp(MATCH, dpi(1)).apply { setMargins(dpi(16), dpi(4), dpi(16), dpi(4)) })
+                    if (liquid) card.addView(View(this).apply { setBackgroundColor(if (C.dark) 0x40FFFFFF else 0x22000000) }, llp(MATCH, dpi(1)).apply { setMargins(dpi(16), dpi(4), dpi(16), dpi(4)) })
                     else card.addView(View(this).apply { setBackgroundColor(C.SEP2) }, llp(MATCH, dpi(8)))
                     prevRow = false
                 }
@@ -1042,7 +1042,7 @@ class MainActivity : Activity() {
                         else if (m.check) row.addView(icon(P.CHECK, C.TEXT, 20), llp(dpi(22), dpi(22)).apply { marginEnd = dpi(14) })
                         else row.addView(View(this), llp(dpi(22), dpi(22)).apply { marginEnd = dpi(14) })
                     }
-                    row.addView(tv(m.label, 17f, col), llp(0, WRAP, 1f))
+                    row.addView(tv(m.label, if (liquid) 16f else 17f, col), llp(0, WRAP, 1f))
                     when {
                         liquid && m.dot == 0 -> if (m.check && m.icon != null) row.addView(icon(P.CHECK, C.TEXT, 18))
                         m.dot != 0 -> {
@@ -1052,7 +1052,7 @@ class MainActivity : Activity() {
                         m.check -> row.addView(icon(P.CHECK, C.TEXT, 18))
                         m.icon != null -> row.addView(icon(m.icon, col, 22))
                     }
-                    card.addView(row, llp(MATCH, dpi(44)))
+                    card.addView(row, llp(MATCH, dpi(if (liquid) 40 else 44)))
                     prevRow = true
                 }
             }
@@ -1063,12 +1063,13 @@ class MainActivity : Activity() {
         )
         val h = card.measuredHeight
         val pvW = dpi(86)
-        val pvH = if (pv != null) dpi(112) else 0
-        val gap = if (pv != null) dpi(14) else 0
+        val usePv = pv != null && h + dpi(112) + dpi(14) <= root.height - topInset - botInset - dpi(24)
+        val pvH = if (usePv) dpi(112) else 0
+        val gap = if (usePv) dpi(14) else 0
         val x = ax.coerceIn(dpi(12).toFloat(), (root.width - w - dpi(12)).toFloat())
         val y = minOf(ay, (root.height - botInset - h - pvH - gap - dpi(12)).toFloat()).coerceAtLeast((topInset + dpi(8)).toFloat())
         o.addView(dim, MATCH, MATCH)
-        if (pv != null) {
+        if (pv != null && usePv) {
             o.addView(pv, flp(pvW, pvH))
             pv.x = x + (w - pvW) / 2f
             pv.y = y
@@ -1208,6 +1209,47 @@ class MainActivity : Activity() {
         val y = loc[1] + cell.height - dpi(8).toFloat()
         if (kind == 3) { trashMenu(f, x, y); return }
         val ext = FileOps.ext(f)
+        if (prefs.getInt("menuStyle", 0) == 1) {
+            // Liquid Glass iOS 27: baris atas Copy / Move / Share, lalu daftar aksi seperti Files iOS
+            val top = listOf(
+                Mi("Copy", P.COPY) { clip = Pair(listOf(f), false); toast("Copied") },
+                Mi("Move", P.FOLDER) { clip = Pair(listOf(f), true); toast("Open a folder, tap ••• then Paste") },
+                Mi("Share", P.SHARE) { share(f) }
+            )
+            val li = ArrayList<Mi>()
+            if (f.isDirectory) li.add(Mi("Open", P.FOLDER) { pushPage(ListPage(f, 0, f.name, true).view) })
+            else {
+                li.add(Mi("Quick Look", P.EYE) { quickLook(f) })
+                li.add(Mi("Open With", P.OPENIN) { openOther(f) })
+            }
+            li.add(Mi(sep = true))
+            li.add(Mi("Get Info", P.INFO) { info(f) })
+            li.add(Mi("Rename", P.PENCIL) { rename(f) })
+            if (ext == "zip") li.add(Mi("Uncompress", P.UNZIP) { extract(f) })
+            else li.add(Mi("Compress", P.ARCHIVE) { bg("Compressed") { FileOps.zip(listOf(f), f.parentFile!!) } })
+            li.add(Mi("Duplicate", P.DUP) { bg("Duplicated") { FileOps.copy(f, f.parentFile!!) } })
+            li.add(Mi("New Folder with Item", P.NEWFOLDER) {
+                bg("Folder created") {
+                    val nm = I18n.t("New Folder")
+                    var d = File(f.parentFile, nm)
+                    var n = 2
+                    while (d.exists()) { d = File(f.parentFile, "$nm $n"); n++ }
+                    d.mkdir()
+                    if (!f.renameTo(File(d, f.name))) throw Exception("Cannot move")
+                }
+            })
+            li.add(Mi(sep = true))
+            li.add(Mi("Tags", P.TAG) { tagMenu(f, x, y) })
+            if (f.isDirectory) {
+                li.add(Mi("Folder Color", P.PALETTE) { folderColorMenu(f, x, y) })
+                li.add(Mi("Folder Icon", P.FOLDER) { pushPage(badgePage(f)) })
+            }
+            if (ext in INSTALLABLE) li.add(Mi("Install", P.DOWNLOAD) { openOther(f) })
+            if (ext in FileOps.IMG) li.add(Mi("Markup", P.MARKUP) { markup(f) })
+            li.add(Mi("Delete", P.TRASH, destructive = true) { bg("Moved to Recently Deleted") { trashIt(f) } })
+            showMenu(x, y, top, li, f)
+            return
+        }
         val items = ArrayList<Mi>()
         items.add(Mi("Copy", P.COPY) { clip = Pair(listOf(f), false); toast("Copied") })
         items.add(Mi("Duplicate", P.DUP) { bg("Duplicated") { FileOps.copy(f, f.parentFile!!) } })

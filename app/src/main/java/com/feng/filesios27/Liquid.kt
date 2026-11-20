@@ -26,9 +26,10 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /** Latar popup Liquid Glass iOS 27: kaca putih tembus pandang dengan bercak warna pastel yang bergerak pelan. */
-class LiquidMenuDrawable(private val radius: Float, private val density: Float) : Drawable() {
-    private val base = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCFF8F8FB.toInt() }
-    private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = density * 1.2f; color = 0xE6FFFFFF.toInt() }
+class LiquidMenuDrawable(private val radius: Float, private val density: Float, private val dark: Boolean = false) : Drawable() {
+    private val base = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = if (dark) 0xC4262629.toInt() else 0xCFF8F8FB.toInt() }
+    private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = density * 1.2f; color = if (dark) 0x66FFFFFF else 0xE6FFFFFF.toInt() }
+    private val shine = Paint(Paint.ANTI_ALIAS_FLAG)
     private val blob = Paint(Paint.ANTI_ALIAS_FLAG)
     private val cols = intArrayOf(0xC9A6FF, 0x9BE8A0, 0xFFC78A, 0x9FD3FF, 0xFFE58A, 0xB0B8FF)
     var phase = 0f
@@ -46,9 +47,12 @@ class LiquidMenuDrawable(private val radius: Float, private val density: Float) 
             val cx = b.left + b.width() * side + sin(a) * b.width() * 0.07f
             val cy = b.top + b.height() * (0.08f + 0.84f * i / (cols.size - 1f)) + cos(a) * b.height() * 0.025f
             val r = b.width() * 0.34f
-            blob.shader = RadialGradient(cx, cy, r, cols[i] or 0x73000000, cols[i], Shader.TileMode.CLAMP)
+            blob.shader = RadialGradient(cx, cy, r, cols[i] or (if (dark) 0x55000000 else 0x73000000), cols[i], Shader.TileMode.CLAMP)
             c.drawCircle(cx, cy, r, blob)
         }
+        shine.shader = android.graphics.LinearGradient(b.left.toFloat(), b.top.toFloat(), b.left + b.width() * 0.6f, b.top + b.height() * 0.5f,
+            if (dark) 0x26FFFFFF else 0x55FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP)
+        c.drawRoundRect(rf, radius, radius, shine)
         c.restore()
         val h = edge.strokeWidth / 2f
         c.drawRoundRect(RectF(rf.left + h, rf.top + h, rf.right - h, rf.bottom - h), radius, radius, edge)

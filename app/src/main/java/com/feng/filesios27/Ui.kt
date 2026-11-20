@@ -697,8 +697,10 @@ class IosEditText(ctx: Context) : EditText(ctx) {
         val o = selectionEnd
         val line = l.getLineForOffset(o)
         val nx = l.getPrimaryHorizontal(o) + compoundPaddingLeft
-        val top = (l.getLineTop(line) + extendedPaddingTop).toFloat()
-        val nh = (l.getLineBottom(line) - l.getLineTop(line)).toFloat()
+        val rawTop = (l.getLineTop(line) + extendedPaddingTop).toFloat()
+        val rawH = (l.getLineBottom(line) - l.getLineTop(line)).toFloat()
+        val nh = minOf(rawH, textSize * 1.25f)
+        val top = rawTop + (rawH - nh) / 2f
         if (!inited) {
             cx = nx; cy = top; ch = nh; tx = nx; ty = top; inited = true
         } else if (nx != tx || top != ty) {
